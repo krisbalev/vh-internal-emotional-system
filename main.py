@@ -55,7 +55,6 @@ def detect_emotion_advanced(text):
     Aggregates predictions from all 27 labels weighted by their scores to compute a composite PAD vector.
     Returns the composite PAD vector along with the raw predictions.
     """
-    # Get predictions: a list of dictionaries for each emotion label
     predictions = classifier(text)[0]
     
     composite_PAD = [0.0, 0.0, 0.0]
@@ -90,15 +89,39 @@ def update_mood(current_mood, emotion_PAD, alpha=ALPHA):
 
 def mood_to_description(mood):
     """
-    Converts the numeric mood state (PAD vector) to a simple descriptive string using the pleasure component.
+    Converts the numeric mood state (PAD vector) to a nuanced descriptive string.
+    Considers pleasure, arousal, and dominance:
+      - Pleasure indicates overall valence (happy vs. sad).
+      - Arousal indicates energy (energetic vs. calm).
+      - Dominance indicates control (in control vs. overwhelmed).
     """
     p, a, d = mood
+
+    # Determine valence from pleasure
     if p > 0.3:
-        return "happy"
+        valence = "happy"
     elif p < -0.3:
-        return "sad"
+        valence = "sad"
     else:
-        return "neutral"
+        valence = "neutral"
+
+    # Determine energy level from arousal
+    if a > 0.3:
+        energy = "energetically"
+    elif a < -0.3:
+        energy = "calmly"
+    else:
+        energy = "moderately"
+
+    # Determine control from dominance
+    if d > 0.3:
+        control = "and in control"
+    elif d < -0.3:
+        control = "and overwhelmed"
+    else:
+        control = "with balance"
+
+    return f"{energy} {valence} {control}"
 
 def main():
     global mood_state
