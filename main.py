@@ -1,11 +1,15 @@
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
+from transformers import pipeline
+import torch
 
-# Download VADER lexicon (only runs the first time)
-nltk.download('vader_lexicon')
-
+# Initialize the transformer-based emotion classifier using the GoEmotions model.
+classifier = pipeline(
+    "text-classification",
+    model="monologg/bert-base-cased-goemotions-original",
+    top_k=None,
+    truncation=True
+)
 
 # Global mood state represented as a PAD vector (pleasure, arousal, dominance)
 mood_state = [0.0, 0.0, 0.0]  # starting at neutral
@@ -13,105 +17,80 @@ mood_state = [0.0, 0.0, 0.0]  # starting at neutral
 # Define a constant update factor for mood changes
 ALPHA = 0.2  # Adjust to tune sensitivity
 
-# Full mapping of 24 emotions (from the paper's Table 10.3) to PAD vectors
-emotion_to_PAD = {
+# Mapping from GoEmotions labels (27 emotions) to PAD vectors.
+# The values below are approximate and inspired by psychological mappings.
+advanced_emotion_to_PAD = {
     "admiration":      (0.5, 0.3, -0.2),
+    "amusement":       (0.45, 0.25, 0.0),
     "anger":           (-0.51, 0.59, 0.25),
-    "disliking":       (-0.4, 0.2, 0.1),
+    "annoyance":       (-0.4, 0.4, 0.1),
+    "approval":        (0.3, 0.1, 0.0),
+    "caring":          (0.4, 0.1, 0.2),
+    "confusion":       (0.0, 0.0, -0.1),
+    "curiosity":       (0.2, 0.3, 0.0),
+    "desire":          (0.4, 0.5, 0.2),
     "disappointment":  (-0.3, 0.1, -0.4),
-    "distress":        (-0.4, -0.2, 0.5),
+    "disapproval":     (-0.3, 0.2, 0.0),
+    "disgust":         (-0.4, 0.2, 0.1),
+    "embarrassment":   (-0.2, -0.1, -0.1),
+    "excitement":      (0.6, 0.7, 0.1),
     "fear":            (-0.64, 0.60, -0.43),
-    "fears-confirmed": (-0.5, -0.3, -0.7),
-    "gloating":        (0.3, -0.3, -0.1),
-    "gratification":   (0.6, 0.5, 0.4),
     "gratitude":       (0.4, 0.2, -0.3),
-    "happy for":       (0.4, 0.2, 0.2),
-    "satisfaction":    (0.3, -0.2, 0.4),
-    "hate":            (-0.6, 0.6, 0.3),
-    "hope":            (0.2, 0.2, -0.1),
+    "grief":           (-0.5, -0.4, -0.2),
     "joy":             (0.4, 0.2, 0.1),
-    "liking":          (0.40, 0.16, -0.24),
     "love":            (0.3, 0.1, 0.2),
-    "pity":            (-0.4, -0.2, -0.5),
+    "nervousness":     (-0.2, 0.3, -0.2),
+    "optimism":        (0.4, 0.3, 0.0),
     "pride":           (0.4, 0.3, 0.3),
+    "realization":     (0.1, 0.1, 0.0),
     "relief":          (0.2, -0.3, 0.4),
     "remorse":         (-0.3, 0.1, -0.6),
-    "reproach":        (-0.3, -0.1, 0.4),
-    "resentment":      (-0.2, -0.3, -0.2),
-    "shame":           (-0.3, 0.1, -0.6)
+    "sadness":         (-0.4, -0.2, -0.3),
+    "surprise":        (0.0, 0.6, 0.0)
 }
 
-# Define keywords for each emotion to aid detection
-emotion_keywords = {
-    "admiration":      ["admire", "admiration"],
-    "anger":           ["angry", "mad", "furious", "irate"],
-    "disliking":       ["dislike", "detest", "loathe"],
-    "disappointment":  ["disappointed", "disappointment"],
-    "distress":        ["distressed", "distress", "troubled"],
-    "fear":            ["scared", "fear", "frightened", "terrified"],
-    "fears-confirmed": ["fears confirmed", "fear confirmed"],
-    "gloating":        ["gloating", "smug"],
-    "gratification":   ["gratification"],
-    "gratitude":       ["grateful", "gratitude"],
-    "happy for":       ["happy for"],
-    "satisfaction":    ["satisfaction", "satisfied", "content"],
-    "hate":            ["hate", "hated"],
-    "hope":            ["hope", "optimistic"],
-    "joy":             ["joy", "joyful", "happy"],
-    "liking":          ["like", "liking"],
-    "love":            ["love", "loving"],
-    "pity":            ["pity", "pitiable"],
-    "pride":           ["proud", "pride"],
-    "relief":          ["relief", "relieved"],
-    "remorse":         ["remorse", "regret"],
-    "reproach":        ["reproach", "blame"],
-    "resentment":      ["resent", "resentment"],
-    "shame":           ["shame", "shamed"]
-}
-
-# Initialize VADER sentiment analyzer
-sid = SentimentIntensityAnalyzer()
-
-def detect_emotion(text):
+def detect_emotion_advanced(text):
     """
-    Detect emotion from text using VADER sentiment analysis combined with keyword heuristics.
-    Returns one of the 24 emotions if a keyword is found; otherwise, falls back to VADER-based classification.
+    Uses the transformer-based classifier to detect a broad range of emotions.
+    Aggregates predictions from all 27 labels weighted by their scores to compute a composite PAD vector.
+    Returns the composite PAD vector along with the raw predictions.
     """
-    text_lower = text.lower()
+    # Get predictions: a list of dictionaries for each emotion label
+    predictions = classifier(text)[0]
     
-    # Check if any emotion keyword is present
-    for emotion, keywords in emotion_keywords.items():
-        for keyword in keywords:
-            if keyword in text_lower:
-                return emotion
+    composite_PAD = [0.0, 0.0, 0.0]
+    total_score = 0.0
+    for pred in predictions:
+        label = pred["label"].lower()  # normalize label to lowercase
+        score = pred["score"]
+        total_score += score
+        pad = advanced_emotion_to_PAD.get(label, (0.0, 0.0, 0.0))
+        composite_PAD[0] += score * pad[0]
+        composite_PAD[1] += score * pad[1]
+        composite_PAD[2] += score * pad[2]
     
-    # Fallback using VADER compound score
-    scores = sid.polarity_scores(text)
-    compound = scores['compound']
-    if compound >= 0.3:
-        return "joy"
-    elif compound <= -0.3:
-        # Default to anger for strong negative sentiment when no keyword is found
-        return "anger"
-    else:
-        return "neutral"
+    # Normalize to get an average PAD vector if total_score > 0
+    if total_score > 0:
+        composite_PAD = [x / total_score for x in composite_PAD]
+    
+    return composite_PAD, predictions
 
 def update_mood(current_mood, emotion_PAD, alpha=ALPHA):
     """
-    Update the mood state by moving a fraction (alpha) towards the new emotion's PAD vector.
+    Update the global mood state by moving it a fraction (alpha) towards the provided emotion PAD vector.
     """
     new_mood = [
         current_mood[0] + alpha * emotion_PAD[0],
         current_mood[1] + alpha * emotion_PAD[1],
         current_mood[2] + alpha * emotion_PAD[2]
     ]
-    # Clamp values between -1 and 1 for stability.
+    # Clamp each value between -1 and 1.
     new_mood = [max(-1, min(1, val)) for val in new_mood]
     return new_mood
 
 def mood_to_description(mood):
     """
-    Convert the numeric mood state (PAD vector) to a simple descriptive string based on the pleasure component.
+    Converts the numeric mood state (PAD vector) to a simple descriptive string using the pleasure component.
     """
     p, a, d = mood
     if p > 0.3:
@@ -120,12 +99,12 @@ def mood_to_description(mood):
         return "sad"
     else:
         return "neutral"
-    
+
 def main():
     global mood_state
 
     # Set up interactive 3D plot for visualization
-    plt.ion()  # Enable interactive mode
+    plt.ion()
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ax.set_xlim([-1, 1])
@@ -134,42 +113,43 @@ def main():
     ax.set_xlabel('Pleasure')
     ax.set_ylabel('Arousal')
     ax.set_zlabel('Dominance')
-    plt.title("Current Mood and Detected Emotion in PAD Space")
+    plt.title("Current Mood and Composite Emotion in PAD Space")
 
-    print("Virtual Human Prototype. Type 'exit' to quit.")
+    print("Advanced Multi-Label Emotion Detection Prototype. Type 'exit' to quit.")
     while True:
-        # Get user input
         user_input = input("You: ")
         if user_input.lower() == "exit":
             break
 
-        # Step 1: Detect emotion from input
-        detected_emotion = detect_emotion(user_input)
-        print(f"Detected emotion: {detected_emotion}")
+        # Detect emotions and compute composite PAD vector.
+        composite_PAD, predictions = detect_emotion_advanced(user_input)
+        # Display top 3 predicted emotions for reference.
+        top_preds = sorted(predictions, key=lambda x: x["score"], reverse=True)[:3]
+        print("Top Predictions:")
+        for pred in top_preds:
+            print(f"  {pred['label']} : {pred['score']:.2f}")
+        print(f"Composite Emotion PAD vector: {composite_PAD}")
 
-        # Step 2: Get PAD vector for detected emotion
-        pad_vector = emotion_to_PAD.get(detected_emotion, (0.0, 0.0, 0.0))
-        print(f"Emotion PAD vector: {pad_vector}")
-
-        # Step 3: Update mood state
-        mood_state = update_mood(mood_state, pad_vector)
+        # Update the global mood state.
+        mood_state = update_mood(mood_state, composite_PAD)
         mood_desc = mood_to_description(mood_state)
         print(f"Updated Mood (PAD): {mood_state}  -> {mood_desc}")
 
-        # Step 4: Update the 3D visualization
-        ax.cla()  # Clear the current axes
+        # Update the 3D visualization.
+        ax.cla()
         ax.set_xlim([-1, 1])
         ax.set_ylim([-1, 1])
         ax.set_zlim([-1, 1])
         ax.set_xlabel('Pleasure')
         ax.set_ylabel('Arousal')
         ax.set_zlabel('Dominance')
-        ax.set_title("Current Mood and Detected Emotion in PAD Space")
+        ax.set_title("Current Mood and Composite Emotion in PAD Space")
         
-        # Plot current mood as a red dot
+        # Plot current mood as a red dot.
         ax.scatter(mood_state[0], mood_state[1], mood_state[2], c='r', marker='o', s=100, label='Current Mood')
-        # Plot the detected emotion vector as a blue arrow from the origin
-        ax.quiver(0, 0, 0, pad_vector[0], pad_vector[1], pad_vector[2], color='b', arrow_length_ratio=0.1, label='Emotion Vector')
+        # Plot composite emotion vector as a blue arrow from the origin.
+        ax.quiver(0, 0, 0, composite_PAD[0], composite_PAD[1], composite_PAD[2],
+                  color='b', arrow_length_ratio=0.1, label='Composite Emotion Vector')
         ax.legend()
         
         plt.draw()
