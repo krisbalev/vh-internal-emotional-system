@@ -1,4 +1,5 @@
 nltk
 matplotlib
 transformers
-torch
+numpy
+joblib
