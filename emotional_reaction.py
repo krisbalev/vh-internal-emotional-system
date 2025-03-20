@@ -3,12 +3,23 @@ from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
 from transformers import pipeline
 import numpy as np
 from typing import Dict, List
+import threading
+import time
 
-# Global constants and variables.
-BASE_ALPHA = 0.2  # Base sensitivity factor.
-mood_state = [0.0, 0.0, 0.0]  # Initial global mood state (neutral).
+# ------------------------------------------------------------------------------
+# Global Parameters and Initial State
+# ------------------------------------------------------------------------------
 
-# Mapping from GoEmotions labels (27 emotions) to approximate PAD vectors.
+BASE_ALPHA = 0.2   # Base sensitivity factor used in updating mood.
+DECAY = 0.98       # Decay factor applied every second to pull mood back to neutral.
+mood_state = [0.0, 0.0, 0.0]  # Global mood state in PAD space (initially neutral).
+last_biased_emotion = None   # Stores the last computed personality-biased emotion vector.
+
+# ------------------------------------------------------------------------------
+# Emotion Mapping and Descriptions
+# ------------------------------------------------------------------------------
+
+# Mapping from GoEmotions labels (27 emotions) to approximate PAD (Pleasure, Arousal, Dominance) vectors.
 advanced_emotion_to_PAD = {
     "admiration":      (0.5, 0.3, -0.2),
     "amusement":       (0.45, 0.25, 0.0),
@@ -39,7 +50,7 @@ advanced_emotion_to_PAD = {
     "surprise":        (0.0, 0.6, 0.0)
 }
 
-# Short explanations for each emotion.
+# Short descriptions for each emotion.
 emotion_descriptions = {
     "admiration": "A feeling of respect and warm approval.",
     "amusement": "Finding something funny or entertaining.",
@@ -70,7 +81,12 @@ emotion_descriptions = {
     "surprise": "A feeling of shock or astonishment."
 }
 
-# Initialize the transformer-based emotion classifier.
+# ------------------------------------------------------------------------------
+# Initialize the Emotion Classifier
+# ------------------------------------------------------------------------------
+
+# This pipeline uses a transformer model ("monologg/bert-base-cased-goemotions-original")
+# to classify text into a range of emotions, returning labels and scores.
 classifier = pipeline(
     "text-classification",
     model="monologg/bert-base-cased-goemotions-original",
@@ -78,79 +94,97 @@ classifier = pipeline(
     truncation=True
 )
 
+# ------------------------------------------------------------------------------
+# Emotion Detection and Mood Update Functions
+# ------------------------------------------------------------------------------
+
 def detect_emotion_advanced(text: str):
     """
-    Detects a broad range of emotions using a transformer-based classifier.
-    Aggregates predictions weighted by their scores to compute a composite PAD vector.
-    Returns the composite PAD vector along with the raw predictions.
+    Detects a broad range of emotions using the transformer-based classifier.
+    It aggregates predictions weighted by their scores to compute a composite PAD vector.
+    
+    Returns:
+        composite_PAD: The weighted average PAD vector.
+        predictions: The raw predictions from the classifier.
     """
     predictions = classifier(text)[0]
-    
     composite_PAD = [0.0, 0.0, 0.0]
     total_score = 0.0
     for pred in predictions:
-        label = pred["label"].lower()  # Normalize label.
+        label = pred["label"].lower()  # Normalize label to match mapping keys.
         score = pred["score"]
         total_score += score
         pad = advanced_emotion_to_PAD.get(label, (0.0, 0.0, 0.0))
+        # Multiply the PAD vector by the prediction score.
         composite_PAD[0] += score * pad[0]
         composite_PAD[1] += score * pad[1]
         composite_PAD[2] += score * pad[2]
-    
     if total_score > 0:
+        # Compute weighted average.
         composite_PAD = [x / total_score for x in composite_PAD]
-    
     return composite_PAD, predictions
 
 def update_mood(current_mood, emotion_PAD, alpha):
     """
-    Updates the global mood state by moving it a fraction (alpha) toward the provided emotion PAD vector.
-    Clamps each dimension between -1 and 1.
+    Updates the global mood state by moving it a fraction (alpha) toward the given emotion PAD vector.
+    
+    Args:
+        current_mood: Current mood state vector.
+        emotion_PAD: New emotion vector (after personality biasing).
+        alpha: Update factor.
+    
+    Returns:
+        New mood state (each component clamped between -1 and 1).
     """
     new_mood = [
         current_mood[0] + alpha * emotion_PAD[0],
         current_mood[1] + alpha * emotion_PAD[1],
         current_mood[2] + alpha * emotion_PAD[2]
     ]
-    new_mood = [max(-1, min(1, val)) for val in new_mood]
-    return new_mood
+    # Clamp each value between -1 and 1.
+    return [max(-1, min(1, val)) for val in new_mood]
 
 def mood_to_description(mood):
     """
-    Converts the numeric mood state (PAD vector) to a descriptive string.
-    - Pleasure (p) indicates valence.
-    - Arousal (a) indicates energy.
-    - Dominance (d) indicates the degree of control.
+    Converts the numeric mood state (PAD vector) into a natural language description.
+    
+    Args:
+        mood: The mood state vector [pleasure, arousal, dominance].
+    
+    Returns:
+        A descriptive string.
     """
     p, a, d = mood
-
+    # Determine valence (pleasure)
     if p > 0.3:
         valence = "happy"
     elif p < -0.3:
         valence = "sad"
     else:
         valence = "neutral"
-
+    # Determine energy (arousal)
     if a > 0.3:
         energy = "energetically"
     elif a < -0.3:
         energy = "calmly"
     else:
         energy = "moderately"
-
+    # Determine control (dominance)
     if d > 0.3:
         control = "and in control"
     elif d < -0.3:
         control = "and overwhelmed"
     else:
         control = "with balance"
-
     return f"{energy} {valence} {control}"
 
 def get_top_dominant_emotions(current_pad, emotion_map, top_n=3):
     """
-    Compares the current PAD vector to each emotion in emotion_map using Euclidean distance.
-    Returns the top_n emotions (lowest distance) along with their distances.
+    Compares the current PAD vector to each emotion in the mapping (using Euclidean distance)
+    and returns the top_n emotions that are closest.
+    
+    Returns:
+        A list of (emotion, distance) tuples.
     """
     similarities = []
     for emotion, vec in emotion_map.items():
@@ -159,9 +193,13 @@ def get_top_dominant_emotions(current_pad, emotion_map, top_n=3):
     similarities.sort(key=lambda x: x[1])
     return similarities[:top_n]
 
-# --- Virtual Human with Personality Biasing ---
-# Viktor's personality based on his character details:
-# Extraversion: 0.3, Neuroticism: 0.4, Openness: 0.9, Agreeableness: 0.5, Conscientiousness: 0.9
+# ------------------------------------------------------------------------------
+# Virtual Human Class with Personality Biasing
+# ------------------------------------------------------------------------------
+
+# The VirtualHuman class represents an agent (Viktor) whose personality biases his emotional reactions.
+# Personality is defined by the Big Five traits and is mapped to a baseline PAD vector.
+# The personality_bias parameter controls how much the personality influences the immediate reaction.
 
 PADVector = List[float]
 BigFive = Dict[str, float]
@@ -173,8 +211,10 @@ class VirtualHuman:
 
     def bigfive_to_PAD(self) -> PADVector:
         """
-        Maps the Big Five personality traits to an approximate PAD vector.
-        Uses a fixed mapping matrix.
+        Maps the Big Five personality traits to an approximate PAD vector using a fixed mapping matrix.
+        
+        Returns:
+            A PAD vector reflecting Viktor's personality.
         """
         bigfive_vector = np.array([
             self.personality.get("extraversion", 0.5),
@@ -183,30 +223,36 @@ class VirtualHuman:
             self.personality.get("agreeableness", 0.5),
             self.personality.get("conscientiousness", 0.5)
         ])
-        # Mapping matrix from Big Five to PAD.
+        # Fixed mapping matrix: rows represent (Pleasure, Arousal, Dominance) dimensions.
         M = np.array([
             [ 0.4, -0.5,  0.0,  0.3,  0.3],
             [ 0.5,  0.5,  0.0,  0.0,  0.0],
             [ 0.4, -0.4,  0.3,  0.0,  0.3]
         ])
         pad = M.dot(bigfive_vector)
-        pad = np.clip(pad, -1, 1)
-        return pad.tolist()
+        return np.clip(pad, -1, 1).tolist()
 
     def compute_immediate_reaction(self, user_emotion: PADVector) -> PADVector:
         """
-        Computes the immediate emotional reaction by combining the user's detected emotion (PAD)
-        with the personality-derived PAD vector.
+        Computes the immediate reaction by blending the user's detected emotion with the personality-derived PAD.
+        
+        The blending is controlled by personality_bias:
+            Reaction = (1 - personality_bias) * (user emotion) + personality_bias * (personality PAD)
+        
+        Returns:
+            The personality-biased emotion vector.
         """
         personality_PAD = np.array(self.bigfive_to_PAD())
         user_vec = np.array(user_emotion)
         final_vec = (1 - self.personality_bias) * user_vec + self.personality_bias * personality_PAD
-        final_vec = np.clip(final_vec, -1, 1)
-        return final_vec.tolist()
+        return np.clip(final_vec, -1, 1).tolist()
 
     def generate_response(self, final_emotion: PADVector) -> str:
         """
         Converts the final PAD vector into a natural language response.
+        
+        Returns:
+            A string describing Viktor's emotional state.
         """
         p, a, d = final_emotion
         if p >= 0.5:
@@ -219,7 +265,6 @@ class VirtualHuman:
             sentiment = "downcast"
         else:
             sentiment = "miserable"
-
         if a >= 0.5:
             energy = "with high energy"
         elif a >= 0.2:
@@ -230,7 +275,6 @@ class VirtualHuman:
             energy = "with low energy"
         else:
             energy = "lethargically"
-
         if d >= 0.5:
             control = "feeling dominant"
         elif d >= 0.2:
@@ -241,109 +285,176 @@ class VirtualHuman:
             control = "submissive"
         else:
             control = "overwhelmed"
-
         return f"I feel {sentiment}, {energy} and {control}."
 
-    def compute_dynamic_alpha(self) -> float:
-        """
-        Computes a dynamic update factor (alpha) based on the Big Five personality traits.
-        Higher neuroticism and lower conscientiousness result in faster emotional changes.
-        The computed alpha is clamped between 0.1 and 0.5.
-        """
-        neuroticism = self.personality.get("neuroticism", 0.5)
-        conscientiousness = self.personality.get("conscientiousness", 0.5)
-        dynamic_alpha = BASE_ALPHA * (1 + (neuroticism - conscientiousness))
-        dynamic_alpha = max(0.1, min(dynamic_alpha, 0.5))
-        return dynamic_alpha
+# ------------------------------------------------------------------------------
+# Dynamic Alpha Calculation
+# ------------------------------------------------------------------------------
 
-# --- Main Interactive Loop ---
+def compute_dynamic_alpha(current_mood, new_emotion, base_alpha=BASE_ALPHA):
+    """
+    Computes an update factor (alpha) based on the cosine similarity between the current mood
+    and the new (personality-biased) emotion vector.
+    
+    A higher cosine similarity (i.e. vectors aligned) yields a larger alpha, meaning a stronger update.
+    
+    Returns:
+        The computed alpha value.
+    """
+    current = np.array(current_mood)
+    new = np.array(new_emotion)
+    norm_current = np.linalg.norm(current)
+    norm_new = np.linalg.norm(new)
+    if norm_current == 0 or norm_new == 0:
+        return base_alpha
+    cos_sim = np.dot(current, new) / (norm_current * norm_new)
+    # Map cosine similarity (-1 to 1) to a new alpha between 0.1 and 0.4 (example mapping).
+    new_alpha = 0.3 * (cos_sim + 1) / 2 + 0.1
+    return new_alpha
 
-def main():
-    global mood_state
+# ------------------------------------------------------------------------------
+# Plotting and Visualization
+# ------------------------------------------------------------------------------
 
-    # Set up an interactive 3D plot for visualization.
-    plt.ion()
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+def update_plot(ax, mood, biased_emotion):
+    """
+    Redraws the 3D plot showing:
+      - All static emotion positions (with labels) from advanced_emotion_to_PAD.
+      - The current global mood (red dot).
+      - The personality-biased emotion vector (blue arrow) from the origin.
+    
+    Args:
+        ax: The matplotlib 3D axes.
+        mood: The current mood state.
+        biased_emotion: The last computed personality-biased emotion vector.
+    """
+    ax.cla()  # Clear the previous plot.
     ax.set_xlim([-1, 1])
     ax.set_ylim([-1, 1])
     ax.set_zlim([-1, 1])
     ax.set_xlabel('Pleasure')
     ax.set_ylabel('Arousal')
     ax.set_zlabel('Dominance')
-    plt.title("Current Mood & Personality-Biased Emotion in PAD Space")
-
-    # Define Viktor's personality based on his character traits.
-    personality: BigFive = {
-        "extraversion": 0.3,      # Reserved and direct
-        "neuroticism": 0.4,       # Aware of his health, yet stoic
-        "openness": 0.9,          # Highly innovative and curious
-        "agreeableness": 0.5,     # Direct and pragmatic
-        "conscientiousness": 0.9  # Extremely methodical and determined
-    }
-    # A slightly higher personality_bias reflects Viktor's strong personal vision.
-    vh = VirtualHuman(personality=personality, personality_bias=0.4)
+    ax.set_title("Current Mood & Personality-Biased Emotion in PAD Space")
     
-    print("Viktor AI Emotion Reaction System. Type 'exit' to quit.")
+    # Plot each emotion's PAD vector as a gray marker with a label.
+    for emotion, coord in advanced_emotion_to_PAD.items():
+        ax.scatter(coord[0], coord[1], coord[2], c='gray', marker='^', s=50)
+        ax.text(coord[0], coord[1], coord[2], emotion, size=8, color='black')
+    
+    # Plot the current global mood (red dot).
+    ax.scatter(mood[0], mood[1], mood[2], c='r', marker='o', s=100, label='Global Mood')
+    
+    # If available, plot the personality-biased emotion vector as an arrow from the origin.
+    if biased_emotion is not None:
+        ax.quiver(0, 0, 0, biased_emotion[0], biased_emotion[1], biased_emotion[2],
+                  color='b', arrow_length_ratio=0.1, label='Biased Emotion Vector')
+    ax.legend()
+    plt.draw()
+
+# ------------------------------------------------------------------------------
+# Timer Callback for Continuous Decay
+# ------------------------------------------------------------------------------
+
+def decay_callback():
+    """
+    Callback function called by a matplotlib timer every 1000 ms.
+    It applies decay to the current mood state to gradually pull it back toward neutral,
+    then updates the plot.
+    """
+    global mood_state
+    mood_state = [val * DECAY for val in mood_state]
+    update_plot(ax, mood_state, last_biased_emotion)
+
+# ------------------------------------------------------------------------------
+# Background Input Thread for User Interaction
+# ------------------------------------------------------------------------------
+
+def process_input():
+    """
+    Runs in a background thread to continuously read user input from the console.
+    For each input, it:
+      - Detects the composite emotion using the classifier.
+      - Applies personality bias to compute an immediate reaction.
+      - Computes a dynamic update factor (alpha) based on cosine similarity.
+      - Updates the global mood state.
+      - Prints details to the console.
+      - Updates the 3D plot.
+    
+    The loop continues until the user types "exit".
+    """
+    global mood_state, last_biased_emotion
     while True:
         user_input = input("You: ")
         if user_input.lower() == "exit":
             break
-
-        # Step 1: Detect the raw composite emotion from the user input.
+        # Detect emotion and compute composite PAD.
         composite_PAD, predictions = detect_emotion_advanced(user_input)
         print("\nDetected Emotion Predictions:")
         top_preds = sorted(predictions, key=lambda x: x["score"], reverse=True)[:3]
         for pred in top_preds:
             print(f"  {pred['label']} : {pred['score']:.2f}")
         print(f"Composite Emotion PAD vector: {composite_PAD}")
-
-        # Step 2: Apply personality biasing to the detected emotion.
+        
+        # Compute the personality-biased reaction.
         biased_emotion = vh.compute_immediate_reaction(composite_PAD)
+        last_biased_emotion = biased_emotion  # Update global record.
         print(f"Personality-biased Emotion PAD vector: {biased_emotion}")
-
-        # Step 3: Compute a dynamic update factor based on Viktor's personality.
-        dynamic_alpha = vh.compute_dynamic_alpha()
+        
+        # Compute dynamic update factor (alpha) based on the alignment between current mood and biased emotion.
+        dynamic_alpha = compute_dynamic_alpha(mood_state, biased_emotion, base_alpha=BASE_ALPHA)
         print(f"Dynamic update factor (alpha): {dynamic_alpha:.2f}")
-
-        # Step 4: Update the global mood state using the personality-biased emotion.
+        
+        # Update the global mood state.
         mood_state = update_mood(mood_state, biased_emotion, alpha=dynamic_alpha)
-        mood_desc = mood_to_description(mood_state)
-        print(f"Updated Global Mood (PAD): {mood_state}  -> {mood_desc}")
-
-        # Step 5: Generate Viktor's final response based on the updated global mood.
+        print(f"Updated Global Mood (PAD): {mood_state} -> {mood_to_description(mood_state)}")
+        
+        # Generate and print Viktor's response.
         response = vh.generate_response(mood_state)
         print("Viktor AI Response:", response)
-
-        # Step 6: Determine and display the top three dominant emotions for the current mood.
+        
+        # Display the top three dominant emotions.
         dominant_emotions = get_top_dominant_emotions(mood_state, advanced_emotion_to_PAD, top_n=3)
         print("Dominant Emotions:")
         for emotion, dist in dominant_emotions:
             explanation = emotion_descriptions.get(emotion, "No description available.")
             print(f"  {emotion.capitalize()} (distance: {dist:.2f}): {explanation}")
-
-        # Update the 3D visualization.
-        ax.cla()
-        ax.set_xlim([-1, 1])
-        ax.set_ylim([-1, 1])
-        ax.set_zlim([-1, 1])
-        ax.set_xlabel('Pleasure')
-        ax.set_ylabel('Arousal')
-        ax.set_zlabel('Dominance')
-        ax.set_title("Current Mood & Personality-Biased Emotion in PAD Space")
         
-        # Plot the updated global mood as a red dot.
-        ax.scatter(mood_state[0], mood_state[1], mood_state[2], c='r', marker='o', s=100, label='Global Mood')
-        # Also plot the personality-biased emotion vector as a blue arrow from the origin.
-        ax.quiver(0, 0, 0, biased_emotion[0], biased_emotion[1], biased_emotion[2],
-                  color='b', arrow_length_ratio=0.1, label='Biased Emotion Vector')
-        ax.legend()
-        
-        plt.draw()
-        plt.pause(0.1)
-    
-    plt.ioff()
-    plt.show()
+        # Update the plot with the new mood state.
+        update_plot(ax, mood_state, last_biased_emotion)
 
-if __name__ == "__main__":
-    main()
+# ------------------------------------------------------------------------------
+# Main Setup and Event Loop
+# ------------------------------------------------------------------------------
+
+# Create the matplotlib figure and 3D axes.
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+# Create a timer (runs in the main thread) to apply decay every 1000 ms.
+timer = fig.canvas.new_timer(interval=1000)
+timer.add_callback(decay_callback)
+timer.start()
+
+# Define Viktor's personality using the Big Five traits.
+# These values define how much the personality will bias the detected emotion.
+personality: BigFive = {
+    "extraversion": 0.3,
+    "neuroticism": 0.4,
+    "openness": 0.9,
+    "agreeableness": 0.5,
+    "conscientiousness": 0.9
+}
+# Create the VirtualHuman (Viktor) with a personality bias parameter.
+vh = VirtualHuman(personality=personality, personality_bias=0.4)
+
+print("Viktor AI Emotion Reaction System. Type 'exit' to quit.")
+# Initial plot update.
+update_plot(ax, mood_state, last_biased_emotion)
+
+# Start the background thread for user input (without daemon flag so the program stays alive).
+input_thread = threading.Thread(target=process_input)
+input_thread.start()
+
+# Block the main thread with the GUI event loop.
+plt.show(block=True)
