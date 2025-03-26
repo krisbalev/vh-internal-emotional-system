@@ -432,7 +432,10 @@ personality: BigFive = {
     "conscientiousness": 0.9
 }
 # Create the VirtualHuman (Viktor) with personality_bias and mood_bias.
+
 vh = VirtualHuman(personality=personality, personality_bias=0.4, mood_bias=0.2)
+# Initialize the global mood_state with the personality baseline.
+mood_state = vh.bigfive_to_PAD()
 
 print("Viktor AI Emotion Reaction System. Type 'exit' to quit.")
 update_plot(ax, mood_state, last_biased_emotion)
