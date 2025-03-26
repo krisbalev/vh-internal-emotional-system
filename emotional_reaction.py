@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+Emotion System for ViktorAI
+
+This script performs emotion detection, mood updates, and visualization.
+It then builds an enriched prompt (using the calculated mood, dominant emotion, and personality)
+and sends it to the ViktorAI LLM API for a response.
+"""
+
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
 from transformers import pipeline
@@ -5,6 +14,7 @@ import numpy as np
 from typing import Dict, List
 import threading
 import time
+import requests
 
 # ------------------------------------------------------------------------------
 # Global Parameters and Initial State
@@ -50,7 +60,6 @@ advanced_emotion_to_PAD = {
     "surprise":        (0.0, 0.6, 0.0)
 }
 
-# Short descriptions for each emotion.
 emotion_descriptions = {
     "admiration": "A feeling of respect and warm approval.",
     "amusement": "Finding something funny or entertaining.",
@@ -367,6 +376,46 @@ def decay_callback():
     update_plot(ax, mood_state, last_biased_emotion)
 
 # ------------------------------------------------------------------------------
+# Prompt Generation for ViktorAI LLM
+# ------------------------------------------------------------------------------
+# This function now explicitly informs Viktor of his dominant emotion.
+
+def generate_llm_prompt(user_input: str, mood: List[float], personality: Dict[str, float]) -> str:
+    mood_description = mood_to_description(mood)
+    dominant_emotions = get_top_dominant_emotions(mood, advanced_emotion_to_PAD, top_n=1)
+    if dominant_emotions:
+        dominant_emotion, distance = dominant_emotions[0]
+        dominant_emotion_description = emotion_descriptions.get(dominant_emotion, "an indescribable emotion")
+    else:
+        dominant_emotion = "neutral"
+        dominant_emotion_description = "a neutral state"
+    
+    prompt = (
+        f"Viktor, based on your current mood, you are primarily feeling {dominant_emotion.upper()} - {dominant_emotion_description}.\n"
+        f"Your overall mood is described as {mood_description}.\n"
+        f"Your personality traits are: {personality}.\n"
+        f"The user said: \"{user_input}\"\n\n"
+        "Please respond in a manner that is empathetic, thoughtful, and true to your character, "
+        "reflecting the dominant emotion you are currently experiencing."
+    )
+    return prompt
+
+# ------------------------------------------------------------------------------
+# Function to Call ViktorAI API
+# ------------------------------------------------------------------------------
+# This function calls the local API wrapper which now uses GPT-J-6B.
+def get_viktor_response(prompt: str) -> str:
+    url = "http://localhost:8000/generate"
+    payload = {"prompt": prompt}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        return response.json().get("response", "")
+    except requests.RequestException as e:
+        print("Error contacting ViktorAI API:", e)
+        return "I'm having trouble processing that right now."
+
+# ------------------------------------------------------------------------------
 # Background Input Thread for User Interaction
 # ------------------------------------------------------------------------------
 
@@ -409,9 +458,13 @@ def process_input():
         mood_state = update_mood(mood_state, biased_emotion, alpha=dynamic_alpha)
         print(f"Updated Global Mood (PAD): {mood_state} -> {mood_to_description(mood_state)}")
         
-        # Generate and print Viktor's response.
-        response = vh.generate_response(mood_state)
-        print("Viktor AI Response:", response)
+        viktor_personality = personality  # Defined below in main
+        enriched_prompt = generate_llm_prompt(user_input, mood_state, viktor_personality)
+        print("\nGenerated Prompt for ViktorAI LLM:")
+        print(enriched_prompt)
+        
+        llm_response = get_viktor_response(enriched_prompt)
+        print("\nViktor LLM Response:", llm_response)
         
         # Display the top three dominant emotions.
         dominant_emotions = get_top_dominant_emotions(mood_state, advanced_emotion_to_PAD, top_n=3)
