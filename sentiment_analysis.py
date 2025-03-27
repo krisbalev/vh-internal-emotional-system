@@ -218,23 +218,26 @@ class VirtualHuman:
 
     def bigfive_to_PAD(self) -> PADVector:
         """
-        Maps the Big Five personality traits to an approximate PAD vector.
-        (Based on a fixed mapping matrix inspired by Mehrabian’s research.)
+        Maps the Big Five personality traits to a PAD vector using Mehrabian's regression formulas.
+        Assumptions:
+          - Emotional Stability is calculated as 1 - neuroticism.
+          - Sophistication is taken as openness.
+          - Big Five scores are assumed to be on a scale from 0 to 1.
         """
-        bigfive_vector = np.array([
-            self.personality.get("extraversion", 0.5),
-            self.personality.get("neuroticism", 0.5),
-            self.personality.get("openness", 0.5),
-            self.personality.get("agreeableness", 0.5),
-            self.personality.get("conscientiousness", 0.5)
-        ])
-        M = np.array([
-            [ 0.4, -0.5,  0.0,  0.3,  0.3],
-            [ 0.5,  0.5,  0.0,  0.0,  0.0],
-            [ 0.4, -0.4,  0.3,  0.0,  0.3]
-        ])
-        pad = M.dot(bigfive_vector)
-        return np.clip(pad, -1, 1).tolist()
+        extraversion = self.personality.get("extraversion", 0.5)
+        agreeableness = self.personality.get("agreeableness", 0.5)
+        neuroticism = self.personality.get("neuroticism", 0.5)
+        # Convert Neuroticism to Emotional Stability:
+        emotional_stability = 1 - neuroticism
+        sophistication = self.personality.get("openness", 0.5)  # treating openness as sophistication
+
+        # Apply Mehrabian's regression equations:
+        P = 0.59 * agreeableness + 0.25 * emotional_stability + 0.19 * extraversion
+        A = -0.65 * emotional_stability + 0.42 * agreeableness
+        D = 0.77 * extraversion - 0.27 * agreeableness + 0.21 * sophistication
+
+        # Optionally, clip values to [-1, 1] if needed.
+        return [np.clip(P, -1, 1), np.clip(A, -1, 1), np.clip(D, -1, 1)]
 
     def compute_immediate_reaction(self, user_emotion: PADVector, current_mood: PADVector) -> PADVector:
         """
