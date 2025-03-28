@@ -227,14 +227,15 @@ class VirtualHuman:
         extraversion = self.personality.get("extraversion", 0.5)
         agreeableness = self.personality.get("agreeableness", 0.5)
         neuroticism = self.personality.get("neuroticism", 0.5)
+        conscientiousness = self.personality.get("conscientiousness", 0.5)
         # Convert Neuroticism to Emotional Stability:
         emotional_stability = 1 - neuroticism
         sophistication = self.personality.get("openness", 0.5)  # treating openness as sophistication
 
         # Apply Mehrabian's regression equations:
-        P = 0.59 * agreeableness + 0.25 * emotional_stability + 0.19 * extraversion
-        A = -0.65 * emotional_stability + 0.42 * agreeableness
-        D = 0.77 * extraversion - 0.27 * agreeableness + 0.21 * sophistication
+        P = 0.59 * agreeableness + 0.19 * emotional_stability + 0.21 * extraversion
+        A = -0.57 * emotional_stability + 0.30 * agreeableness + 0.15 * sophistication
+        D = 0.60 * extraversion - 0.32 * agreeableness + 0.25 * sophistication + 0.17 * conscientiousness
 
         # Optionally, clip values to [-1, 1] if needed.
         return [np.clip(P, -1, 1), np.clip(A, -1, 1), np.clip(D, -1, 1)]
