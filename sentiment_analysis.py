@@ -5,6 +5,7 @@ import numpy as np
 from typing import Dict, List
 import threading
 import time
+from scipy.optimize import minimize  # For weight optimization
 
 # ------------------------------------------------------------------------------
 # Global Parameters and Initial State
@@ -120,13 +121,58 @@ classifier = pipeline(
 )
 
 # ------------------------------------------------------------------------------
-# Emotion Detection and Mood Update Functions
+# Weight Calculation and Optimization (from the PCMD paper)
 # ------------------------------------------------------------------------------
-
-def detect_emotion_advanced(text: str):
+def compute_emotion_weights(personality, emotion_mapping, lambda_val=0.01):
     """
-    Detects a broad range of emotions using the transformer-based classifier.
-    It aggregates predictions weighted by their scores to compute a composite PAD vector.
+    Computes optimal emotion weights by solving:
+         min_{w >= 0} ||D * w - P||^2 + lambda * ||w||^2,
+    where D is a 3 x S matrix built from the emotion_mapping (PAD vectors)
+    and P is the personality vector in PAD space.
+    
+    Args:
+        personality: A list or array of 3 values (PAD vector) representing personality.
+        emotion_mapping: A dictionary mapping emotion names to their PAD vectors.
+        lambda_val: Regularization parameter.
+        
+    Returns:
+        optimal_weights: A numpy array of optimal weights (one per emotion).
+        emotion_names: The list of emotion names corresponding to each weight.
+    """
+    emotion_names = list(emotion_mapping.keys())
+    S = len(emotion_names)
+    # Build the matrix D of shape (3, S); each column is an emotion's PAD vector.
+    D = np.array([emotion_mapping[emo] for emo in emotion_names]).T  # shape (3, S)
+    
+    P = np.array(personality)  # personality PAD vector (shape: (3,))
+    
+    # Define the objective function: ||D * w - P||^2 + lambda * ||w||^2.
+    def objective(w):
+        return np.linalg.norm(D.dot(w) - P)**2 + lambda_val * np.linalg.norm(w)**2
+    
+    # Initial guess: start with all ones.
+    w0 = np.ones(S)
+    
+    # Define bounds: all weights must be nonnegative.
+    bounds = [(0, None)] * S
+    
+    # Solve the optimization problem.
+    res = minimize(objective, w0, bounds=bounds)
+    
+    if res.success:
+        optimal_weights = res.x
+    else:
+        raise ValueError("Optimization did not converge.")
+    
+    return optimal_weights, emotion_names
+
+# ------------------------------------------------------------------------------
+# Advanced Emotion Detection using Optimal Weights
+# ------------------------------------------------------------------------------
+def detect_emotion_weighted(text: str, optimal_weights: dict):
+    """
+    Detects emotions using the transformer-based classifier and applies optimal weights.
+    It aggregates predictions weighted by (score * optimal_weight) to compute a composite PAD vector.
     
     Returns:
         composite_PAD: The weighted average PAD vector.
@@ -134,20 +180,23 @@ def detect_emotion_advanced(text: str):
     """
     predictions = classifier(text)[0]
     composite_PAD = [0.0, 0.0, 0.0]
-    total_score = 0.0
+    total_weighted_score = 0.0
     for pred in predictions:
         label = pred["label"].lower()  # Normalize label to match mapping keys.
         score = pred["score"]
-        total_score += score
+        weight = optimal_weights.get(label, 1.0)  # Default to 1.0 if label not in optimal_weights.
+        total_weighted_score += score * weight
         pad = advanced_emotion_to_PAD.get(label, (0.0, 0.0, 0.0))
-        # Multiply the PAD vector by the prediction score.
-        composite_PAD[0] += score * pad[0]
-        composite_PAD[1] += score * pad[1]
-        composite_PAD[2] += score * pad[2]
-    if total_score > 0:
-        # Compute weighted average.
-        composite_PAD = [x / total_score for x in composite_PAD]
+        composite_PAD[0] += score * weight * pad[0]
+        composite_PAD[1] += score * weight * pad[1]
+        composite_PAD[2] += score * weight * pad[2]
+    if total_weighted_score > 0:
+        composite_PAD = [x / total_weighted_score for x in composite_PAD]
     return composite_PAD, predictions
+
+# ------------------------------------------------------------------------------
+# Update Mood Functions
+# ------------------------------------------------------------------------------
 
 def update_mood(current_mood, biased_emotion, alpha):
     """
@@ -201,7 +250,6 @@ def get_top_dominant_emotions(current_pad, emotion_map, top_n=3):
 # ------------------------------------------------------------------------------
 # Virtual Human Class with Personality and Mood Biasing
 # ------------------------------------------------------------------------------
-
 PADVector = List[float]
 BigFive = Dict[str, float]
 
@@ -215,7 +263,12 @@ class VirtualHuman:
         self.personality = personality
         self.personality_bias = personality_bias
         self.mood_bias = mood_bias
-
+        # Compute personality baseline from Big Five mapping.
+        self.personality_PAD = self.bigfive_to_PAD()
+        # Compute optimal emotion weights based on personality and emotion mapping.
+        optimal_weights, emotion_names = compute_emotion_weights(self.personality_PAD, advanced_emotion_to_PAD, lambda_val=0.01)
+        self.optimal_weights = {name: weight for name, weight in zip(emotion_names, optimal_weights)}
+    
     def bigfive_to_PAD(self) -> PADVector:
         """
         Maps the Big Five personality traits to a PAD vector using Mehrabian's regression formulas.
@@ -239,30 +292,21 @@ class VirtualHuman:
 
         # Optionally, clip values to [-1, 1] if needed.
         return [np.clip(P, -1, 1), np.clip(A, -1, 1), np.clip(D, -1, 1)]
-
+    
     def compute_immediate_reaction(self, user_emotion: PADVector, current_mood: PADVector) -> PADVector:
         """
         Computes the immediate emotion reaction by blending:
-          - The raw emotion (from user input)
-          - The personality-based baseline (from Big Five)
+          - The raw weighted emotion (from user input processed with optimal weights)
           - The current mood (as an appraisal bias)
-          
+          (Note: The personality influence is already embedded in the computed optimal weights.)
         The blending weights are:
-          (1 - personality_bias - mood_bias) * user_emotion +
-          personality_bias * personality_PAD +
-          mood_bias * current_mood
+          (1 - mood_bias) * user_emotion + mood_bias * current_mood
         """
-        # Get personality baseline from Big Five mapping
-        personality_PAD = np.array(self.bigfive_to_PAD())
         user_vec = np.array(user_emotion)
         current_mood_vec = np.array(current_mood)
-        # Calculate weight for raw emotion: total weight must sum to 1.
-        weight_user = 1 - self.personality_bias - self.mood_bias
-        # Blend the three components: raw emotion, personality, and current mood.
-        final_vec = weight_user * user_vec + self.personality_bias * personality_PAD + self.mood_bias * current_mood_vec
+        final_vec = (1 - self.mood_bias) * user_vec + self.mood_bias * current_mood_vec
         return np.clip(final_vec, -1, 1).tolist()
-
-
+    
     def generate_response(self, final_emotion: PADVector) -> str:
         """
         Converts the final PAD vector into a natural language description.
@@ -382,12 +426,13 @@ def process_input():
         user_input = input("You: ")
         if user_input.lower() == "exit":
             break
-        composite_PAD, predictions = detect_emotion_advanced(user_input)
-        print("\nDetected Emotion Predictions:")
+        # Use the weighted emotion detection with optimal weights.
+        composite_PAD, predictions = detect_emotion_weighted(user_input, vh.optimal_weights)
+        print("\nDetected Emotion Predictions (Weighted):")
         top_preds = sorted(predictions, key=lambda x: x["score"], reverse=True)[:3]
         for pred in top_preds:
             print(f"  {pred['label']} : {pred['score']:.2f}")
-        print(f"Composite Emotion PAD vector: {composite_PAD}")
+        print(f"Composite Emotion PAD vector (weighted): {composite_PAD}")
         
         # Compute the personality- and mood-biased reaction.
         biased_emotion = vh.compute_immediate_reaction(composite_PAD, mood_state)
@@ -436,7 +481,6 @@ personality: BigFive = {
     "conscientiousness": 0.9
 }
 # Create the VirtualHuman (Viktor) with personality_bias and mood_bias.
-
 vh = VirtualHuman(personality=personality, personality_bias=0.4, mood_bias=0.2)
 # Initialize the global mood_state with the personality baseline.
 mood_state = vh.bigfive_to_PAD()
