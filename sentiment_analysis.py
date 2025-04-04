@@ -197,7 +197,6 @@ def detect_emotion_weighted(text: str, optimal_weights: dict):
 # ------------------------------------------------------------------------------
 # Update Mood Functions
 # ------------------------------------------------------------------------------
-
 def update_mood(current_mood, biased_emotion, alpha):
     """
     Updates the global mood state using exponential smoothing:
@@ -298,7 +297,6 @@ class VirtualHuman:
         Computes the immediate emotion reaction by blending:
           - The raw weighted emotion (from user input processed with optimal weights)
           - The current mood (as an appraisal bias)
-          (Note: The personality influence is already embedded in the computed optimal weights.)
         The blending weights are:
           (1 - mood_bias) * user_emotion + mood_bias * current_mood
         """
@@ -307,47 +305,62 @@ class VirtualHuman:
         final_vec = (1 - self.mood_bias) * user_vec + self.mood_bias * current_mood_vec
         return np.clip(final_vec, -1, 1).tolist()
     
-    def generate_response(self, final_emotion: PADVector) -> str:
+    def generate_response(self, user_text: str, final_emotion: PADVector) -> str:
         """
-        Converts the final PAD vector into a natural language description.
+        Converts the final PAD vector into a natural language description and uses the user input.
         """
-        p, a, d = final_emotion
-        if p >= 0.5:
-            sentiment = "ecstatic"
-        elif p >= 0.2:
-            sentiment = "happy"
-        elif p >= -0.2:
-            sentiment = "neutral"
-        elif p >= -0.5:
-            sentiment = "downcast"
-        else:
-            sentiment = "miserable"
-        if a >= 0.5:
-            energy = "with high energy"
-        elif a >= 0.2:
-            energy = "energetically"
-        elif a >= -0.2:
-            energy = "calmly"
-        elif a >= -0.5:
-            energy = "with low energy"
-        else:
-            energy = "lethargically"
-        if d >= 0.5:
-            control = "feeling dominant"
-        elif d >= 0.2:
-            control = "in control"
-        elif d >= -0.2:
-            control = "balanced"
-        elif d >= -0.5:
-            control = "submissive"
-        else:
-            control = "overwhelmed"
-        return f"I feel {sentiment}, {energy} and {control}."
+        mood_desc = mood_to_description(final_emotion)
+        return generate_chatgpt_response(user_text, final_emotion, mood_desc)
+
+# ------------------------------------------------------------------------------
+# ChatGPT API Integration
+# ------------------------------------------------------------------------------
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=api_key)
+
+def generate_chatgpt_response(user_text, current_mood, mood_description):
+    """
+    Generates a response from ChatGPT by providing both the user input and the virtual human's mood context.
+    
+    Args:
+        user_text (str): The user's input.
+        current_mood (list): The current PAD state, e.g., [pleasure, arousal, dominance].
+        mood_description (str): A natural language description of the mood (e.g., "energetically happy and in control").
+    
+    Returns:
+        response (str): The generated response from ChatGPT.
+    """
+    # Construct the system prompt that informs the LLM about Viktor's affective state.
+    system_prompt = (
+        f"You are Viktor, a virtual agent with a personality and an internal mood state. "
+        f"Your current mood is described as '{mood_description}' with a PAD vector of {current_mood}. "
+        "When responding, reflect this affective state in your tone and word choice."
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_text},
+    ]
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini-2024-07-18",
+            messages=messages,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling ChatGPT API: {e}"
 
 # ------------------------------------------------------------------------------
 # Dynamic Alpha Calculation
 # ------------------------------------------------------------------------------
-
 def compute_dynamic_alpha(current_mood, new_emotion, base_alpha=BASE_ALPHA):
     """
     Computes an update factor (alpha) based on the cosine similarity between the current mood
@@ -359,16 +372,13 @@ def compute_dynamic_alpha(current_mood, new_emotion, base_alpha=BASE_ALPHA):
     norm_new = np.linalg.norm(new)
     if norm_current == 0 or norm_new == 0:
         return base_alpha
-    # Compute cosine similarity.
     cos_sim = np.dot(current, new) / (norm_current * norm_new)
-    # Map cosine similarity to alpha value.
     new_alpha = 0.3 * (cos_sim + 1) / 2 + 0.1
     return new_alpha
 
 # ------------------------------------------------------------------------------
 # Plotting and Visualization
 # ------------------------------------------------------------------------------
-
 def update_plot(ax, mood, biased_emotion):
     """
     Redraws the 3D plot showing:
@@ -399,15 +409,12 @@ def update_plot(ax, mood, biased_emotion):
 # ------------------------------------------------------------------------------
 # Timer Callback for Continuous Mood Decay
 # ------------------------------------------------------------------------------
-
 def decay_callback():
     """
     Applies exponential decay to the current mood, moving it gradually toward the personality baseline.
     """
     global mood_state
-    # Compute personality baseline from Big Five mapping.
     personality_baseline = vh.bigfive_to_PAD()
-    # Update each component: mood = mood + DECAY_RATE * (baseline - mood)
     mood_state[:] = [current + DECAY_RATE * (baseline - current)
                      for current, baseline in zip(mood_state, personality_baseline)]
     update_plot(ax, mood_state, last_biased_emotion)
@@ -415,7 +422,6 @@ def decay_callback():
 # ------------------------------------------------------------------------------
 # Background Input Thread for User Interaction
 # ------------------------------------------------------------------------------
-
 def process_input():
     """
     Continuously reads user input from the console and processes the emotion,
@@ -447,8 +453,8 @@ def process_input():
         mood_state[:] = update_mood(mood_state, biased_emotion, dynamic_alpha)
         print(f"Updated Global Mood (PAD): {mood_state} -> {mood_to_description(mood_state)}")
         
-        # Generate and print Viktor's response.
-        response = vh.generate_response(mood_state)
+        # Generate and print Viktor's response using ChatGPT API
+        response = vh.generate_response(user_input, mood_state)
         print("Viktor AI Response:", response)
         
         # Display the top three dominant emotions.
@@ -463,7 +469,6 @@ def process_input():
 # ------------------------------------------------------------------------------
 # Main Setup and Event Loop
 # ------------------------------------------------------------------------------
-
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
