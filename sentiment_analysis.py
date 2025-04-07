@@ -1,3 +1,7 @@
+from flask import Flask, request, jsonify, send_file, render_template
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit
+import requests
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
 from transformers import pipeline
@@ -6,6 +10,9 @@ from typing import Dict, List
 import threading
 import time
 from scipy.optimize import minimize  # For weight optimization
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
 
 # ------------------------------------------------------------------------------
 # Global Parameters and Initial State
@@ -309,23 +316,20 @@ class VirtualHuman:
         """
         Converts the final PAD vector into a natural language description and uses the user input.
         """
-        mood_desc = mood_to_description(final_emotion)
-        return generate_chatgpt_response(user_text, final_emotion, mood_desc)
+        dominant_emotions_data = get_top_dominant_emotions(final_emotion, advanced_emotion_to_PAD, top_n=3)
+        dominant_emotion_names = [emotion for emotion, _ in dominant_emotions_data]
+        return generate_chatgpt_response(user_text, final_emotion, dominant_emotion_names, self.personality)
 
 # ------------------------------------------------------------------------------
 # ChatGPT API Integration
 # ------------------------------------------------------------------------------
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
-
 load_dotenv()
 
 api_key = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
-def generate_chatgpt_response(user_text, current_mood, mood_description):
+def generate_chatgpt_response(user_text, current_mood, dominant_emotions, personality):
     """
     Generates a response from ChatGPT by providing both the user input and the virtual human's mood context.
     
@@ -337,13 +341,14 @@ def generate_chatgpt_response(user_text, current_mood, mood_description):
     Returns:
         response (str): The generated response from ChatGPT.
     """
-    # Construct the system prompt that informs the LLM about Viktor's affective state.
+    personality_description = bigfive_to_text(personality)
     system_prompt = (
-        f"You are Viktor, a virtual agent with a personality and an internal mood state. "
-        f"Your current mood is described as '{mood_description}' with a PAD vector of {current_mood}. "
-        "When responding, reflect this affective state in your tone and word choice."
+        f"You are Viktor, a virtual agent with a distinct personality and an internal mood state. "
+        f"Your personality is characterized as: {personality_description}. "
+        f"Your current emotion is represented by the PAD vector {current_mood}. "
+        f"Your dominant emotions are {', '.join(dominant_emotions)}. "
+        "When responding, reflect both your personality and your current affective state in your tone and word choice."
     )
-    
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text},
@@ -351,12 +356,64 @@ def generate_chatgpt_response(user_text, current_mood, mood_description):
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini-2024-07-18",
+            model="gpt-4o-2024-11-20",
             messages=messages,
         )
         return response.choices[0].message.content
     except Exception as e:
         return f"Error calling ChatGPT API: {e}"
+    
+
+def bigfive_to_text(bigfive: Dict[str, float]) -> str:
+    extraversion = bigfive.get("extraversion", 0.5)
+    neuroticism = bigfive.get("neuroticism", 0.5)
+    openness = bigfive.get("openness", 0.5)
+    agreeableness = bigfive.get("agreeableness", 0.5)
+    conscientiousness = bigfive.get("conscientiousness", 0.5)
+    
+    description = []
+    
+    # Extraversion
+    if extraversion > 0.7:
+        description.append("highly extraverted")
+    elif extraversion < 0.3:
+        description.append("introverted")
+    else:
+        description.append("moderately extraverted")
+    
+    # Neuroticism (inverse for stability)
+    if neuroticism > 0.7:
+        description.append("prone to anxiety")
+    elif neuroticism < 0.3:
+        description.append("emotionally stable")
+    else:
+        description.append("moderately emotionally stable")
+        
+    # Openness
+    if openness > 0.7:
+        description.append("very open to new experiences")
+    elif openness < 0.3:
+        description.append("more conventional")
+    else:
+        description.append("moderately open")
+    
+    # Agreeableness
+    if agreeableness > 0.7:
+        description.append("highly cooperative and empathetic")
+    elif agreeableness < 0.3:
+        description.append("more competitive")
+    else:
+        description.append("fairly agreeable")
+    
+    # Conscientiousness
+    if conscientiousness > 0.7:
+        description.append("very conscientious")
+    elif conscientiousness < 0.3:
+        description.append("laid-back")
+    else:
+        description.append("moderately conscientious")
+    
+    return ", ".join(description)
 
 # ------------------------------------------------------------------------------
 # Dynamic Alpha Calculation
@@ -466,6 +523,108 @@ def process_input():
         
         update_plot(ax, mood_state, last_biased_emotion)
 
+        socketio.emit("new_message", {"message": user_input, "response": response})
+
+# ------------------------------------------------------------------------------
+# Flask Application and Socket.IO Setup
+# ------------------------------------------------------------------------------
+app = Flask(__name__, template_folder='templates', static_folder='static')
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    global mood_state, last_biased_emotion
+    data = request.get_json()
+    user_text = data.get("message", "")
+    if not user_text:
+        return jsonify({"error": "No message provided"}), 400
+    
+    # Detect emotion from the user input using weighted detection.
+    composite_PAD, predictions = detect_emotion_weighted(user_text, vh.optimal_weights)
+    # Compute personality- and mood-biased reaction.
+    biased_emotion = vh.compute_immediate_reaction(composite_PAD, mood_state)
+    last_biased_emotion = biased_emotion
+    
+    # Compute dynamic update factor.
+    dynamic_alpha = compute_dynamic_alpha(mood_state, biased_emotion, base_alpha=BASE_ALPHA)
+    
+    # Update the global mood.
+    mood_state[:] = update_mood(mood_state, biased_emotion, dynamic_alpha)
+    
+    # Generate a response using ChatGPT integration.
+    response = vh.generate_response(user_text, mood_state)
+    
+    # Emit the response to WebSocket clients.
+    socketio.emit("new_message", {"message": user_text, "response": response})
+    
+    update_plot(ax, mood_state, last_biased_emotion)
+    
+    return jsonify({
+        "response": response,
+        "mood": mood_state,
+        "mood_description": mood_to_description(mood_state)
+    })
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_URL = os.getenv("ELEVENLABS_API_URL")
+VOICE_ID = "iP95p4xoKVk53GoZ742B"
+
+@app.route('/tts', methods=['POST'])
+def tts():
+    """Generate TTS audio using ElevenLabs."""
+    data = request.get_json()
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    try:
+        # Send TTS request to ElevenLabs
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVENLABS_API_KEY
+        }
+        payload = {
+            "text": text,
+            "voice_settings": {
+                "stability": 0.75,
+                "similarity_boost": 0.9
+            }
+        }
+
+        response = requests.post(
+            f"{ELEVENLABS_API_URL}/{VOICE_ID}",
+            json=payload,
+            headers=headers
+        )
+
+        if response.status_code == 200:
+            audio_path = "output.mp3"
+            with open(audio_path, "wb") as audio_file:
+                audio_file.write(response.content)
+
+            return send_file(audio_path, mimetype="audio/mpeg")
+        else:
+            print("ElevenLabs response:", response.text)
+            return jsonify({"error": "TTS generation failed", "details": response.text}), 500
+
+    except Exception as e:
+        print("Error in /tts endpoint:", str(e))
+        return jsonify({"error": "An unexpected error occurred", "details": str(e)}), 500
+
+@socketio.on("connect")
+def handle_connect():
+    print("Client connected")
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    print("Client disconnected")
+
 # ------------------------------------------------------------------------------
 # Main Setup and Event Loop
 # ------------------------------------------------------------------------------
@@ -496,4 +655,6 @@ update_plot(ax, mood_state, last_biased_emotion)
 input_thread = threading.Thread(target=process_input)
 input_thread.start()
 
-plt.show(block=True)
+if __name__ == "__main__":
+    threading.Thread(target=lambda: socketio.run(app, host="0.0.0.0", port=5000)).start()
+    plt.show(block=True)

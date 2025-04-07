@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Natural TTS with ElevenLabs (Animated Avatar)</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <style>
+      body {
+          margin: 0;
+          overflow: hidden; /* Remove scrollbars */
+      }
+      #avatar-container {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+      }
+      #messages {
+          position: absolute;
+          bottom: 10px;
+          left: 10px;
+          background-color: rgba(255, 255, 255, 0.8);
+          padding: 10px;
+          border-radius: 5px;
+          max-width: 90%;
+          max-height: 30%;
+          overflow-y: auto;
+      }
+  </style>
+</head>
+<body>
+  <div id="avatar-container"></div>
+  <div id="messages">
+      <!-- Chat messages will appear here -->
+  </div>
+
+  <script>
+    // Connect to the WebSocket server
+    const socket = io("http://localhost:5000");
+
+    let avatar;            // The 3D avatar
+    let mixer;             // For animations
+    let idleAction;        // Idle (subtle sway)
+    let talkAction;        // Talk (head flap)
+    const clock = new THREE.Clock();
+
+    // Initialize Three.js for the 3D avatar
+    const container = document.getElementById("avatar-container");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Lighting
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(0, 5, 5);
+    scene.add(light);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    // Load the Ready Player Me avatar
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      "https://models.readyplayer.me/677aa65f2cf5a5e11a42dbb3.glb",
+      (gltf) => {
+        avatar = gltf.scene;
+        avatar.scale.set(1.5, 1.5, 1.5);  
+        avatar.position.set(0, -1.5, 0); 
+        avatar.rotation.y = 0;           
+        scene.add(avatar);
+
+        mixer = new THREE.AnimationMixer(avatar);
+
+        // 1) If there's a built-in idle, use it; otherwise, use custom idle
+        if (gltf.animations && gltf.animations.length > 0) {
+          const builtinIdleClip = gltf.animations[0];
+          idleAction = mixer.clipAction(builtinIdleClip);
+          idleAction.play();
+        } else {
+          console.warn("No built-in animations found. Using custom idle animation.");
+          const customIdleClip = createCustomIdleAnimation(avatar);
+          idleAction = mixer.clipAction(customIdleClip);
+          idleAction.setLoop(THREE.LoopRepeat);
+          idleAction.play();
+        }
+
+        // 2) Create the talking clip (we won't play it yet)
+        const talkClip = createTalkingAnimation(avatar);
+        talkAction = mixer.clipAction(talkClip);
+        talkAction.setLoop(THREE.LoopRepeat);
+
+        console.log("Avatar loaded successfully.");
+      },
+      undefined,
+      (error) => {
+        console.error("Error loading avatar:", error);
+      }
+    );
+
+    // Camera
+    camera.position.set(0, 1, 2.5);
+
+    // Render/Update Loop
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      if (mixer) mixer.update(delta);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    //----------------------------------------------------------------------
+    // TTS: pause idle, play talk while speaking; revert on end
+    //----------------------------------------------------------------------
+    async function speak(text) {
+      try {
+        const response = await fetch("http://localhost:5000/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!response.ok) {
+          console.error("Error generating TTS:", await response.json());
+          return;
+        }
+
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+
+        audio.onplay = () => {
+          // Stop idle, start talk
+          if (idleAction) idleAction.stop();
+          if (talkAction) {
+            talkAction.reset();
+            talkAction.play();
+          }
+        };
+
+        audio.onended = () => {
+          // Stop talk, resume idle
+          if (talkAction) talkAction.stop();
+          if (idleAction) {
+            idleAction.reset();
+            idleAction.play();
+          }
+        };
+
+        audio.play();
+      } catch (error) {
+        console.error("Error with TTS:", error);
+      }
+    }
+
+    //----------------------------------------------------------------------
+    // Chat UI
+    //----------------------------------------------------------------------
+    function appendMessage(sender, text) {
+      const messagesDiv = document.getElementById("messages");
+      const messageElement = document.createElement("p");
+      messageElement.innerHTML = `<strong>${sender}:</strong> ${text}`;
+      messagesDiv.appendChild(messageElement);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    socket.on("new_message", (data) => {
+      const { message, response } = data;
+      appendMessage("Johnny Bravo", response);
+      speak(response);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "t") {
+        speak("Testing text-to-speech!");
+      }
+    });
+
+    //----------------------------------------------------------------------
+    // 1) Keep the existing custom idle: slight up/down + arms sway
+    //----------------------------------------------------------------------
+    function createCustomIdleAnimation(avatarRoot) {
+      const times = [0, 1.5, 3];
+      const yValues = [-1.5, -1.45, -1.5];
+      const rightArmValues = [1.2, 1.3, 1.2];
+      const leftArmValues  = [1.2, 1.3, 1.2];
+
+      avatarRoot.name = "AvatarRoot";
+
+      const rightArm = avatarRoot.getObjectByName("RightArm");
+      if (rightArm) rightArm.name = "RightArmBone";
+      const leftArm = avatarRoot.getObjectByName("LeftArm");
+      if (leftArm) leftArm.name = "LeftArmBone";
+
+      const rootTrack = new THREE.NumberKeyframeTrack("AvatarRoot.position[y]", times, yValues);
+      const rightArmTrack = rightArm
+        ? new THREE.NumberKeyframeTrack("RightArmBone.rotation[x]", times, rightArmValues)
+        : null;
+      const leftArmTrack = leftArm
+        ? new THREE.NumberKeyframeTrack("LeftArmBone.rotation[x]", times, leftArmValues)
+        : null;
+
+      const tracks = [rootTrack];
+      if (rightArmTrack) tracks.push(rightArmTrack);
+      if (leftArmTrack)  tracks.push(leftArmTrack);
+
+      return new THREE.AnimationClip("CustomIdle", 3, tracks);
+    }
+
+    //----------------------------------------------------------------------
+    // 2) Make talking slower + smaller angle so he doesn't look down as much
+    //----------------------------------------------------------------------
+    function createTalkingAnimation(avatarRoot) {
+      // We'll do a slower, 0.8 second cycle
+      // times = [0, 0.4, 0.8]
+      const times = [0, 0.4, 0.8];
+
+      const headRotValues = [-0.3, -0.4, -0.3];
+
+      const headBone = avatarRoot.getObjectByName("Head");
+      if (headBone) {
+        headBone.name = "HeadBone";
+      } else {
+        console.warn("No Head bone found. Using root for talk animation.");
+        avatarRoot.name = "AvatarRoot";
+      }
+
+      const headTrack = headBone
+        ? new THREE.NumberKeyframeTrack("HeadBone.rotation[x]", times, headRotValues)
+        : new THREE.NumberKeyframeTrack("AvatarRoot.rotation[x]", times, headRotValues);
+
+      return new THREE.AnimationClip("TalkAnim", 0.8, [headTrack]);
+    }
+  </script>
+</body>
+</html>

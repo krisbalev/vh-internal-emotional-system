@@ -1,5 +1,10 @@
-nltk
+Flask
+Flask-Cors
+Flask-SocketIO
+requests
 matplotlib
 transformers
 numpy
-joblib
+scipy
+python-dotenv
+openai
