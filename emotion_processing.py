@@ -1,4 +1,3 @@
-# emotion_processing.py
 from transformers import pipeline
 import numpy as np
 from scipy.optimize import minimize

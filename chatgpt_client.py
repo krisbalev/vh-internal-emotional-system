@@ -1,4 +1,3 @@
-# chatgpt_client.py
 import os
 from openai import OpenAI
 from utils import bigfive_to_text

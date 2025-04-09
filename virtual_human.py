@@ -1,10 +1,9 @@
 # virtual_human.py
 import numpy as np
-from emotion_processing import compute_emotion_weights, detect_emotion_weighted
+from emotion_processing import compute_emotion_weights
 from mood import get_top_dominant_emotions
 from config import advanced_emotion_to_PAD
 from chatgpt_client import generate_chatgpt_response
-from utils import bigfive_to_text
 
 class VirtualHuman:
     def __init__(self, personality, personality_bias=0.4, mood_bias=0.2):
