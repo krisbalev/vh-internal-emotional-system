@@ -19,23 +19,42 @@
           width: 100%;
           height: 100%;
       }
-      #messages {
+      #chat-container {
           position: absolute;
-          bottom: 10px;
-          left: 10px;
+          bottom: 0;
+          left: 0;
+          width: 100%;
           background-color: rgba(255, 255, 255, 0.8);
           padding: 10px;
-          border-radius: 5px;
-          max-width: 90%;
-          max-height: 30%;
+          box-sizing: border-box;
+      }
+      #messages {
+          max-height: 200px;
           overflow-y: auto;
+          margin-bottom: 10px;
+      }
+      #chat-input {
+          width: 80%;
+          padding: 8px;
+          font-size: 1em;
+      }
+      #send-button {
+          padding: 8px 16px;
+          font-size: 1em;
+          margin-left: 5px;
       }
   </style>
 </head>
 <body>
   <div id="avatar-container"></div>
-  <div id="messages">
-      <!-- Chat messages will appear here -->
+  <div id="chat-container">
+      <div id="messages">
+          <!-- Chat messages will appear here -->
+      </div>
+      <form id="chat-form">
+          <input type="text" id="chat-input" placeholder="Type your message here..." autocomplete="off" />
+          <button type="submit" id="send-button">Send</button>
+      </form>
   </div>
 
   <script>
@@ -123,126 +142,148 @@
     }
     animate();
 
-    //----------------------------------------------------------------------
-    // TTS: pause idle, play talk while speaking; revert on end
-    //----------------------------------------------------------------------
-    async function speak(text) {
-      try {
-        const response = await fetch("http://localhost:5000/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
+    //----------------------------------------------------------------------  
+    // TTS: pause idle, play talk while speaking; revert on end  
+    //----------------------------------------------------------------------  
+    async function speak(text) {  
+      try {  
+        const response = await fetch("http://localhost:5000/tts", {  
+          method: "POST",  
+          headers: { "Content-Type": "application/json" },  
+          body: JSON.stringify({ text }),  
+        });  
 
-        if (!response.ok) {
-          console.error("Error generating TTS:", await response.json());
-          return;
-        }
+        if (!response.ok) {  
+          console.error("Error generating TTS:", await response.json());  
+          return;  
+        }  
 
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
+        const audioBlob = await response.blob();  
+        const audioUrl = URL.createObjectURL(audioBlob);  
+        const audio = new Audio(audioUrl);  
 
-        audio.onplay = () => {
-          // Stop idle, start talk
-          if (idleAction) idleAction.stop();
-          if (talkAction) {
-            talkAction.reset();
-            talkAction.play();
-          }
-        };
+        audio.onplay = () => {  
+          // Stop idle, start talk  
+          if (idleAction) idleAction.stop();  
+          if (talkAction) {  
+            talkAction.reset();  
+            talkAction.play();  
+          }  
+        };  
 
-        audio.onended = () => {
-          // Stop talk, resume idle
-          if (talkAction) talkAction.stop();
-          if (idleAction) {
-            idleAction.reset();
-            idleAction.play();
-          }
-        };
+        audio.onended = () => {  
+          // Stop talk, resume idle  
+          if (talkAction) talkAction.stop();  
+          if (idleAction) {  
+            idleAction.reset();  
+            idleAction.play();  
+          }  
+        };  
 
-        audio.play();
-      } catch (error) {
-        console.error("Error with TTS:", error);
-      }
-    }
+        audio.play();  
+      } catch (error) {  
+        console.error("Error with TTS:", error);  
+      }  
+    }  
 
-    //----------------------------------------------------------------------
-    // Chat UI
-    //----------------------------------------------------------------------
-    function appendMessage(sender, text) {
-      const messagesDiv = document.getElementById("messages");
-      const messageElement = document.createElement("p");
-      messageElement.innerHTML = `<strong>${sender}:</strong> ${text}`;
-      messagesDiv.appendChild(messageElement);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    }
-    socket.on("new_message", (data) => {
-      const { message, response } = data;
-      appendMessage("Johnny Bravo", response);
-      speak(response);
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "t") {
-        speak("Testing text-to-speech!");
-      }
-    });
+    //----------------------------------------------------------------------  
+    // Chat UI  
+    //----------------------------------------------------------------------  
+    function appendMessage(sender, text) {  
+      const messagesDiv = document.getElementById("messages");  
+      const messageElement = document.createElement("p");  
+      messageElement.innerHTML = `<strong>${sender}:</strong> ${text}`;  
+      messagesDiv.appendChild(messageElement);  
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;  
+    }  
 
-    //----------------------------------------------------------------------
-    // 1) Keep the existing custom idle: slight up/down + arms sway
-    //----------------------------------------------------------------------
-    function createCustomIdleAnimation(avatarRoot) {
-      const times = [0, 1.5, 3];
-      const yValues = [-1.5, -1.45, -1.5];
-      const rightArmValues = [1.2, 1.3, 1.2];
-      const leftArmValues  = [1.2, 1.3, 1.2];
+    // Listen for new messages from the server  
+    socket.on("new_message", (data) => {  
+      const { message, response } = data;  
+      appendMessage("Johnny Bravo", response);  
+      speak(response);  
+    });  
 
-      avatarRoot.name = "AvatarRoot";
+    // Handle chat form submission  
+    document.getElementById("chat-form").addEventListener("submit", async (e) => {  
+      e.preventDefault();  
+      const inputField = document.getElementById("chat-input");  
+      const message = inputField.value.trim();  
+      if (message === "") return;  
 
-      const rightArm = avatarRoot.getObjectByName("RightArm");
-      if (rightArm) rightArm.name = "RightArmBone";
-      const leftArm = avatarRoot.getObjectByName("LeftArm");
-      if (leftArm) leftArm.name = "LeftArmBone";
+      // Append the user's message  
+      appendMessage("You", message);  
 
-      const rootTrack = new THREE.NumberKeyframeTrack("AvatarRoot.position[y]", times, yValues);
-      const rightArmTrack = rightArm
-        ? new THREE.NumberKeyframeTrack("RightArmBone.rotation[x]", times, rightArmValues)
-        : null;
-      const leftArmTrack = leftArm
-        ? new THREE.NumberKeyframeTrack("LeftArmBone.rotation[x]", times, leftArmValues)
-        : null;
+      try {  
+        const res = await fetch("http://localhost:5000/chat", {  
+          method: "POST",  
+          headers: { "Content-Type": "application/json" },  
+          body: JSON.stringify({ message }),  
+        });  
+        const data = await res.json();  
+        // Optionally, process data if needed  
+      } catch (err) {  
+        console.error("Error sending message:", err);  
+      }  
 
-      const tracks = [rootTrack];
-      if (rightArmTrack) tracks.push(rightArmTrack);
-      if (leftArmTrack)  tracks.push(leftArmTrack);
+      inputField.value = "";  
+    });  
 
-      return new THREE.AnimationClip("CustomIdle", 3, tracks);
-    }
+    //----------------------------------------------------------------------  
+    // 1) Keep the existing custom idle: slight up/down + arms sway  
+    //----------------------------------------------------------------------  
+    function createCustomIdleAnimation(avatarRoot) {  
+      const times = [0, 1.5, 3];  
+      const yValues = [-1.5, -1.45, -1.5];  
+      const rightArmValues = [1.2, 1.3, 1.2];  
+      const leftArmValues  = [1.2, 1.3, 1.2];  
 
-    //----------------------------------------------------------------------
-    // 2) Make talking slower + smaller angle so he doesn't look down as much
-    //----------------------------------------------------------------------
-    function createTalkingAnimation(avatarRoot) {
-      // We'll do a slower, 0.8 second cycle
-      // times = [0, 0.4, 0.8]
-      const times = [0, 0.4, 0.8];
+      avatarRoot.name = "AvatarRoot";  
 
-      const headRotValues = [-0.3, -0.4, -0.3];
+      const rightArm = avatarRoot.getObjectByName("RightArm");  
+      if (rightArm) rightArm.name = "RightArmBone";  
+      const leftArm = avatarRoot.getObjectByName("LeftArm");  
+      if (leftArm) leftArm.name = "LeftArmBone";  
 
-      const headBone = avatarRoot.getObjectByName("Head");
-      if (headBone) {
-        headBone.name = "HeadBone";
-      } else {
-        console.warn("No Head bone found. Using root for talk animation.");
-        avatarRoot.name = "AvatarRoot";
-      }
+      const rootTrack = new THREE.NumberKeyframeTrack("AvatarRoot.position[y]", times, yValues);  
+      const rightArmTrack = rightArm  
+        ? new THREE.NumberKeyframeTrack("RightArmBone.rotation[x]", times, rightArmValues)  
+        : null;  
+      const leftArmTrack = leftArm  
+        ? new THREE.NumberKeyframeTrack("LeftArmBone.rotation[x]", times, leftArmValues)  
+        : null;  
 
-      const headTrack = headBone
-        ? new THREE.NumberKeyframeTrack("HeadBone.rotation[x]", times, headRotValues)
-        : new THREE.NumberKeyframeTrack("AvatarRoot.rotation[x]", times, headRotValues);
+      const tracks = [rootTrack];  
+      if (rightArmTrack) tracks.push(rightArmTrack);  
+      if (leftArmTrack)  tracks.push(leftArmTrack);  
 
-      return new THREE.AnimationClip("TalkAnim", 0.8, [headTrack]);
-    }
+      return new THREE.AnimationClip("CustomIdle", 3, tracks);  
+    }  
+
+    //----------------------------------------------------------------------  
+    // 2) Make talking slower + smaller angle so he doesn't look down as much  
+    //----------------------------------------------------------------------  
+    function createTalkingAnimation(avatarRoot) {  
+      // We'll do a slower, 0.8 second cycle  
+      // times = [0, 0.4, 0.8]  
+      const times = [0, 0.4, 0.8];  
+
+      const headRotValues = [-0.3, -0.4, -0.3];  
+
+      const headBone = avatarRoot.getObjectByName("Head");  
+      if (headBone) {  
+        headBone.name = "HeadBone";  
+      } else {  
+        console.warn("No Head bone found. Using root for talk animation.");  
+        avatarRoot.name = "AvatarRoot";  
+      }  
+
+      const headTrack = headBone  
+        ? new THREE.NumberKeyframeTrack("HeadBone.rotation[x]", times, headRotValues)  
+        : new THREE.NumberKeyframeTrack("AvatarRoot.rotation[x]", times, headRotValues);  
+
+      return new THREE.AnimationClip("TalkAnim", 0.8, [headTrack]);  
+    }  
   </script>
 </body>
 </html>
