@@ -149,8 +149,8 @@ def process_input():
         socketio.emit("new_message", {"message": user_input, "response": response})
 
 if __name__ == "__main__":
-    # Start the input thread for console interaction.
-    input_thread = threading.Thread(target=process_input)
+    # Start the input thread as a daemon.
+    input_thread = threading.Thread(target=process_input, daemon=True)
     input_thread.start()
     
     # Set up a matplotlib timer for periodic mood decay.
@@ -158,9 +158,15 @@ if __name__ == "__main__":
     personality_baseline = vh.bigfive_to_PAD()
     timer.add_callback(lambda: decay_callback(mood_state, personality_baseline, ax, last_biased_emotion))
     timer.start()
+
+    # Start the Flask-SocketIO server in a daemon thread.
+    socketio_thread = threading.Thread(target=lambda: socketio.run(app, host="0.0.0.0", port=5000), daemon=True)
+    socketio_thread.start()
     
-    # Start the Flask-SocketIO server in a separate thread.
-    threading.Thread(target=lambda: socketio.run(app, host="0.0.0.0", port=5000)).start()
-    
-    # Show the plot (this call blocks until the plot window is closed).
-    plt.show(block=True)
+    try:
+        # Show the plot; this will block.
+        plt.show(block=True)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt caught. Shutting down...")
+    finally:
+        plt.close('all')
