@@ -26,7 +26,7 @@ last_biased_emotion = None
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
-# Define Viktor's personality using Big Five traits.
+# Define Johnny Bravo's personality using Big Five traits.
 personality = {
     "extraversion": 0.3,
     "neuroticism": 0.4,
@@ -137,7 +137,7 @@ def process_input():
         print(f"Updated Global Mood (PAD): {mood_state} -> {mood_to_description(mood_state)}")
         
         response = vh.generate_response(user_input, mood_state)
-        print("Viktor AI Response:", response)
+        print("Johnny Bravo AI Response:", response)
         
         dominant_emotions = get_top_dominant_emotions(mood_state, advanced_emotion_to_PAD, top_n=3)
         print("Dominant Emotions:")

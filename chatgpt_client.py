@@ -10,7 +10,7 @@ client = OpenAI(api_key=api_key)
 def generate_chatgpt_response(user_text, current_mood, dominant_emotions, personality):
     personality_description = bigfive_to_text(personality)
     system_prompt = (
-        f"You are Viktor, a virtual agent with a distinct personality and an internal mood state. "
+        f"You are Johnny Bravo, a virtual agent with a distinct personality and an internal mood state. "
         f"Your personality is characterized as: {personality_description}. "
         f"Your current emotion is represented by the PAD vector {current_mood}. "
         f"Your dominant emotions are {', '.join(dominant_emotions)}. "
