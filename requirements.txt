@@ -1,4 +1,10 @@
-nltk
+Flask
+flask_cors
+flask_socketio
 matplotlib
 transformers
-torch
+numpy
+scipy
+python-dotenv
+openai
+requests
