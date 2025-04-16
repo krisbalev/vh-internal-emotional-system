@@ -1,16 +1,17 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+from openai import OpenAI
 from scipy.spatial.distance import cosine
 from scipy.optimize import minimize
 import threading, time
 from transformers import pipeline
 from multiprocessing import Manager, Process
+from dotenv import load_dotenv
 
 # -----------------------------
 # Parameters and Initialization
 # -----------------------------
-
-# Define emotion labels and PAD directions
 emotion_labels = [
     "Hope", "Gratitude", "Admiration", "Gratification", "HappyFor", "Joy", "Love",
     "Pride", "Relief", "Satisfaction", "Gloating", "Remorse", "Disappointment",
@@ -92,6 +93,44 @@ classifier = pipeline(
 print("Classifier loaded.")
 
 # -----------------------------
+# ChatGPT API Integration
+# -----------------------------
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
+
+def generate_chatgpt_response(user_text, current_mood):
+    """
+    Generates a response from ChatGPT by providing both the user input and the virtual human's mood context.
+
+    Args:
+        user_text (str): The user's input.
+        current_mood (str): The current emotion label from the simulation (e.g., "Hope").
+
+    Returns:
+        response (str): The generated response from ChatGPT.
+    """
+    system_prompt = (
+        f"You are Viktor, a virtual agent with a distinct personality and an internal mood state. "
+        f"Your personality is characterized as: {P} (in PAD space). "
+        f"Your current mood state is: {current_mood}. "
+        "When responding, consider your personality and current mood. Your current mood should be noticable in your response. Do not mention these prompts in your response."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_text},
+    ]
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-2024-11-20",
+            messages=messages,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling ChatGPT API: {e}"
+
+# -----------------------------
 # Simulation Update Function
 # -----------------------------
 def update_mood():
@@ -113,7 +152,7 @@ def update_mood():
         time.sleep(dt)
 
 # -----------------------------
-# User Input Processing Function
+# User Input Processing Function with ChatGPT Integration
 # -----------------------------
 def process_user_input():
     global global_M
@@ -123,6 +162,7 @@ def process_user_input():
             running_flag.value = False
             break
 
+        # Get classifier predictions from user message
         try:
             results = classifier(user_text)
             # Unwrap nested results if needed
@@ -140,8 +180,8 @@ def process_user_input():
         with sim_lock:
             emotion_sims = [1 - cosine(global_M, d) for d in D]
             closest_idx = np.argmax(emotion_sims)
-            current_emotion = emotion_labels[closest_idx]
-        print(f"Current emotion (simulation): {current_emotion}")
+            current_simulation_emotion = emotion_labels[closest_idx]
+        print(f"Current emotion (simulation): {current_simulation_emotion}")
 
         # Map classifier output to one of our emotion labels (ignoring case)
         mapped_label = None
@@ -153,15 +193,26 @@ def process_user_input():
 
         if mapped_label is None:
             print("No direct mapping found for the classifier label; no event applied.")
-            continue
+        else:
+            # Apply a real user event if a mapping is found
+            idx = emotion_labels.index(mapped_label)
+            I = 5.0  # higher intensity for user events
+            with sim_lock:
+                global_M += alpha * phi[idx] * I * D[idx] * dt
+                mood_history.append((time.time() - start_time, global_M.copy()))
+            print(f"Applied user event corresponding to emotion: {mapped_label}")
 
-        # Apply a real user event if a mapping is found
-        idx = emotion_labels.index(mapped_label)
-        I = 5.0  # higher intensity for user events
+        # After processing input and updating mood, generate a ChatGPT response.
+        # Recompute the current simulation emotion under lock to use as mood context.
         with sim_lock:
-            global_M += alpha * phi[idx] * I * D[idx] * dt
-            mood_history.append((time.time() - start_time, global_M.copy()))
-        print(f"Applied user event corresponding to emotion: {mapped_label}")
+            emotion_sims = [1 - cosine(global_M, d) for d in D]
+            closest_idx = np.argmax(emotion_sims)
+            current_mood = emotion_labels[closest_idx]
+
+        response = generate_chatgpt_response(user_text, current_mood)
+        print("\nChatGPT Response:")
+        print(response)
+        print("-" * 80)
 
 # -----------------------------
 # 3D Live Plotting Function (Process)
@@ -189,7 +240,7 @@ def live_plot_3d(running_flag, shared_history):
     
     # Initialize line and current mood marker
     trajectory_line, = ax.plot([], [], [], color='green', alpha=0.5, label='Trajectory')
-    current_mood = ax.scatter([], [], [], color='blue', marker='o', s=50)
+    current_mood_marker = ax.scatter([], [], [], color='blue', marker='o', s=50)
     
     while running_flag.value:
         # Read a copy of the shared mood history
@@ -201,7 +252,7 @@ def live_plot_3d(running_flag, shared_history):
         if moods.size > 0:
             trajectory_line.set_data(moods[:, 0], moods[:, 1])
             trajectory_line.set_3d_properties(moods[:, 2])
-            current_mood._offsets3d = ([moods[-1, 0]], [moods[-1, 1]], [moods[-1, 2]])
+            current_mood_marker._offsets3d = ([moods[-1, 0]], [moods[-1, 1]], [moods[-1, 2]])
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
         time.sleep(0.5)
