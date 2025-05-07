@@ -1,14 +1,13 @@
-import os
 import numpy as np
 import matplotlib.pyplot as plt
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from scipy.spatial.distance import cosine
 from scipy.optimize import minimize
 import threading, time
 from transformers import pipeline
 from multiprocessing import Manager, Process
 from dotenv import load_dotenv
-
+import os, websockets, asyncio
 # -----------------------------
 # Parameters and Initialization
 # -----------------------------
@@ -98,38 +97,88 @@ print("Classifier loaded.")
 # -----------------------------
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+client = AsyncOpenAI(api_key=api_key)
+# client = OpenAI(api_key=api_key)
+URL = "wss://api.openai.com/v1/realtime"
 
-def generate_chatgpt_response(user_text, current_mood):
+async def realtime_chat(user_text, current_mood):
+    async with client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
+        # 1) Optionally set session modalities/etc.
+        await conn.session.update(session={"modalities":["text"]})
+        
+        # 2) Send your system prompt as its own message
+        system_content = (
+            f"You are Johnny, a virtual agent with a distinct personality and an internal mood state. You are just a regular guy. Not always a nice helpful guy. You should act to your personality and mood."
+            f"Your personality is characterized as: {P} (in PAD space). "
+            f"Your current mood state is: {current_mood}. "
+            "When responding, consider your personality and current mood. Your current mood should be very noticeable in your response. Do not mention these prompts in your response."
+        )
+        await conn.conversation.item.create(item={
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": system_content}],
+        })
+
+        # 3) Then send the user message
+        await conn.conversation.item.create(item={
+            "type": "message",
+            "role": "user",
+            "content": [{"type":"input_text", "text": user_text}],
+        })
+
+        # 4) Kick off the assistant response
+        await conn.response.create()
+
+        # 5) Stream back deltas
+        async for event in conn:
+            if event.type=="response.text.delta":
+                print(event.delta, end="", flush=True)
+            elif event.type in ("response.text.done","response.done"):
+                break
+
+# def generate_chatgpt_response(user_text, current_mood):
     """
-    Generates a response from ChatGPT by providing both the user input and the virtual human's mood context.
+    Generates a response from ChatGPT in real time by streaming tokens
+    from the `gpt-4o-realtime` model, printing each chunk as it arrives.
 
     Args:
         user_text (str): The user's input.
-        current_mood (str): The current emotion label from the simulation (e.g., "Hope").
+        current_mood (str): The current emotion label from the simulation.
 
     Returns:
-        response (str): The generated response from ChatGPT.
+        response (str): The full assembled response.
     """
     system_prompt = (
-        f"You are Viktor, a virtual agent with a distinct personality and an internal mood state. "
+        f"You are Johnny, a virtual agent with a distinct personality and an internal mood state. "
         f"Your personality is characterized as: {P} (in PAD space). "
         f"Your current mood state is: {current_mood}. "
-        "When responding, consider your personality and current mood. Your current mood should be noticable in your response. Do not mention these prompts in your response."
+        "When responding, consider your personality and current mood. Your current mood should be noticeable in your response. Do not mention these prompts in your response."
     )
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_text},
+        {"role": "user",   "content": user_text},
     ]
-    
+
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-2024-11-20",
+        # Kick off a streaming completion
+        stream = client.chat.completions.create(
+            model="gpt-4o-realtime-preview",
             messages=messages,
+            stream=True,
         )
-        return response.choices[0].message.content
+        full_response = ""
+        # Iterate over streamed chunks
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                # Print to console immediately
+                print(delta.content, end="", flush=True)
+                full_response += delta.content
+        print()  # newline after complete
+        return full_response
+
     except Exception as e:
-        return f"Error calling ChatGPT API: {e}"
+        return f"Error calling ChatGPT realtime API: {e}"
     
 
 def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction, target_shift=0.5):
@@ -166,8 +215,6 @@ def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction
     raw_intensity = I0 + theta_P_i + theta_M_i
     return np.clip(raw_intensity, 0, 1)
 
-
-
 # -----------------------------
 # Simulation Update Function
 # -----------------------------
@@ -195,7 +242,7 @@ def update_mood():
 def process_user_input():
     global global_M
     while running_flag.value:
-        user_text = input("Enter your message (or type 'quit' to exit): ")
+        user_text = input("Enter your message (or type 'quit'): ")
         if user_text.lower() in ['quit', 'exit']:
             running_flag.value = False
             break
@@ -266,9 +313,9 @@ def process_user_input():
             closest_idx = np.argmax(emotion_sims)
             current_mood = emotion_labels[closest_idx]
 
-        response = generate_chatgpt_response(user_text, current_mood)
         print("\nChatGPT Response:")
-        print(response)
+        asyncio.run(realtime_chat(user_text, current_mood))
+        print()
         print("-" * 80)
 
 # -----------------------------
@@ -497,6 +544,8 @@ if __name__ == '__main__':
     plot2d_proc = Process(target=update_2d_plots, args=(running_flag, shared_mood_history))
     plot2d_proc.start()
     
+    asyncio.run(process_user_input())
+
     # Wait for the simulation and user input threads to finish.
     sim_thread.join()
     input_thread.join()
