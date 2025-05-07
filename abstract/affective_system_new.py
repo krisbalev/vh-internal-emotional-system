@@ -20,28 +20,28 @@ emotion_labels = [
 ]
 
 D = np.array([
-    [0.2,  0.2,  -0.1],
-    [0.4,  0.2,  -0.3],
-    [0.5,  0.3,  -0.2],
-    [0.6,  0.5,   0.4],
-    [0.4,  0.2,   0.2],
-    [0.4,  0.2,   0.1],
-    [0.3,  0.1,   0.2],
-    [0.4,  0.3,   0.3],
-    [0.2, -0.3,   0.4],
-    [0.3, -0.2,   0.4],
-    [0.3, -0.3,  -0.1],
-    [-0.3,  0.1, -0.6],
-    [-0.3,  0.1, -0.4],
-    [-0.64, 0.60, -0.43],
-    [-0.3,  0.1, -0.6],
-    [-0.2, -0.3, -0.2],
-    [-0.5, -0.3, -0.7],
-    [-0.4, -0.2, -0.5],
-    [-0.4, -0.2, -0.5],
-    [-0.51, 0.59,  0.25],
-    [-0.6,  0.6,   0.3],
-    [-0.3, -0.1,  0.4]
+    [0.2,  0.2,  -0.1], # Hope
+    [0.4,  0.2,  -0.3], # Gratitude
+    [0.5,  0.3,  -0.2], # Admiration
+    [0.6,  0.5,   0.4], # Gratification
+    [0.4,  0.2,   0.2], # HappyFor
+    [0.4,  0.2,   0.1], # Joy
+    [0.3,  0.1,   0.2], # Love
+    [0.4,  0.3,   0.3], # Pride
+    [0.2, -0.3,   0.4], # Relief
+    [0.3, -0.2,   0.4], # Satisfaction
+    [0.3, -0.3,  -0.1], # Gloating
+    [-0.3,  0.1, -0.6], # Remorse
+    [-0.3,  0.1, -0.4], # Disappointment
+    [-0.64, 0.60, -0.43], # Fear
+    [-0.3,  0.1, -0.6], # Shame
+    [-0.2, -0.3, -0.2], # Resentment
+    [-0.5, -0.3, -0.7], # Fears-confirmed 
+    [-0.4, -0.2, -0.5], # Pity
+    [-0.4, -0.2, -0.5], # Distress
+    [-0.51, 0.59,  0.25], # Anger
+    [-0.6,  0.6,   0.3], # Hate
+    [-0.3, -0.1,  0.4] # Reproach
 ])
 S = len(emotion_labels)
 p = np.ones(S) / S
@@ -62,6 +62,7 @@ lambda_e = 1.0
 lambda_m = 0.001
 event_rate = 1/3.0
 a = alpha / lambda_e * (1 - np.exp(-lambda_e / event_rate))
+TARGET_SHIFT = 0.5
 
 def pcmd_objective(phi):
     U = sum(phi[i] * p[i] * np.outer(D[i], D[i]) for i in range(S))
@@ -129,6 +130,43 @@ def generate_chatgpt_response(user_text, current_mood):
         return response.choices[0].message.content
     except Exception as e:
         return f"Error calling ChatGPT API: {e}"
+    
+
+def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction, target_shift=0.5):
+    """
+    Calculate the emotion intensity by projecting personality and mood
+    onto the emotion's PAD direction, normalizing via cosine, then
+    scaling by target_shift.
+
+    Args:
+        I0 (float): Base intensity (from OCC appraisal).
+        current_mood (np.array): M in PAD space.
+        personality (np.array): P in PAD space.
+        emotion_direction (np.array): D_i in PAD space.
+        target_shift (float): Maximum absolute bias contribution.
+
+    Returns:
+        float: Clipped intensity in [0, 1].
+    """
+    # normalize so dot‐product becomes cosine similarity in [-1,1]
+    norm_P = np.linalg.norm(personality)
+    norm_M = np.linalg.norm(current_mood)
+    norm_D = np.linalg.norm(emotion_direction)
+    if norm_P == 0 or norm_M == 0 or norm_D == 0:
+        # fallback to no bias if any vector is zero
+        return np.clip(I0, 0, 1)
+
+    proj_P = np.dot(personality, emotion_direction) / (norm_P * norm_D)
+    proj_M = np.dot(current_mood, emotion_direction) / (norm_M * norm_D)
+
+    # bias terms capped by target_shift
+    theta_P_i = target_shift * proj_P
+    theta_M_i = target_shift * proj_M
+
+    raw_intensity = I0 + theta_P_i + theta_M_i
+    return np.clip(raw_intensity, 0, 1)
+
+
 
 # -----------------------------
 # Simulation Update Function
@@ -183,7 +221,7 @@ def process_user_input():
             current_simulation_emotion = emotion_labels[closest_idx]
         print(f"Current emotion (simulation): {current_simulation_emotion}")
 
-        # Map classifier output to one of our emotion labels (ignoring case)
+        # Map classifier output to one of our emotion labels
         mapped_label = None
         if predicted_label is not None:
             for label in emotion_labels:
@@ -194,13 +232,32 @@ def process_user_input():
         if mapped_label is None:
             print("No direct mapping found for the classifier label; no event applied.")
         else:
-            # Apply a real user event if a mapping is found
+            # Determine the emotion index from the mapped label
             idx = emotion_labels.index(mapped_label)
-            I = 5.0  # higher intensity for user events
+            # For illustration, let's assume occ_intensity is drawn from U(0, 1).
+            # In practice, this could be computed from a more sophisticated appraisal.
+            occ_intensity = np.random.uniform(0, 1)
+            
+           # Manually recompute the two bias terms so we can print them
+            norm_P = np.linalg.norm(P)
+            norm_M = np.linalg.norm(global_M)
+            norm_D = np.linalg.norm(D[idx])
+            proj_P = np.dot(P, D[idx]) / (norm_P * norm_D) if norm_P and norm_D else 0.0
+            proj_M = np.dot(global_M, D[idx]) / (norm_M * norm_D) if norm_M and norm_D else 0.0
+            theta_P_i = TARGET_SHIFT * proj_P
+            theta_M_i = TARGET_SHIFT * proj_M
+            
+            # Print out the bias terms
+            print(f"Personality bias (θ_P): {theta_P_i:.3f}, Mood bias (θ_M): {theta_M_i:.3f}")
+            
+            # Now compute intensity
+            I = calculate_emotion_intensity(occ_intensity, global_M, P, D[idx], TARGET_SHIFT)
+            
             with sim_lock:
                 global_M += alpha * phi[idx] * I * D[idx] * dt
                 mood_history.append((time.time() - start_time, global_M.copy()))
-            print(f"Applied user event corresponding to emotion: {mapped_label}")
+            
+            print(f"Applied {mapped_label}: intensity={I:.3f}")
 
         # After processing input and updating mood, generate a ChatGPT response.
         # Recompute the current simulation emotion under lock to use as mood context.
