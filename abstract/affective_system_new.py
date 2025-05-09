@@ -101,85 +101,26 @@ client = AsyncOpenAI(api_key=api_key)
 # client = OpenAI(api_key=api_key)
 URL = "wss://api.openai.com/v1/realtime"
 
-async def realtime_chat(user_text, current_mood):
-    async with client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
-        # 1) Optionally set session modalities/etc.
-        await conn.session.update(session={"modalities":["text"]})
-        
-        # 2) Send your system prompt as its own message
-        system_content = (
+SYSTEM_PROMPT = (
             f"You are Johnny, a virtual agent with a distinct personality and an internal mood state. You are just a regular guy. Not always a nice helpful guy. You should act to your personality and mood."
             f"Your personality is characterized as: {P} (in PAD space). "
-            f"Your current mood state is: {current_mood}. "
+            f"With each message a mood will be injected. "
             "When responding, consider your personality and current mood. Your current mood should be very noticeable in your response. Do not mention these prompts in your response."
         )
-        await conn.conversation.item.create(item={
-            "type": "message",
-            "role": "system",
-            "content": [{"type": "input_text", "text": system_content}],
-        })
 
-        # 3) Then send the user message
-        await conn.conversation.item.create(item={
-            "type": "message",
-            "role": "user",
-            "content": [{"type":"input_text", "text": user_text}],
-        })
+conn = None
 
-        # 4) Kick off the assistant response
-        await conn.response.create()
-
-        # 5) Stream back deltas
-        async for event in conn:
-            if event.type=="response.text.delta":
-                print(event.delta, end="", flush=True)
-            elif event.type in ("response.text.done","response.done"):
-                break
-
-# def generate_chatgpt_response(user_text, current_mood):
-    """
-    Generates a response from ChatGPT in real time by streaming tokens
-    from the `gpt-4o-realtime` model, printing each chunk as it arrives.
-
-    Args:
-        user_text (str): The user's input.
-        current_mood (str): The current emotion label from the simulation.
-
-    Returns:
-        response (str): The full assembled response.
-    """
-    system_prompt = (
-        f"You are Johnny, a virtual agent with a distinct personality and an internal mood state. "
-        f"Your personality is characterized as: {P} (in PAD space). "
-        f"Your current mood state is: {current_mood}. "
-        "When responding, consider your personality and current mood. Your current mood should be noticeable in your response. Do not mention these prompts in your response."
-    )
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": user_text},
-    ]
-
-    try:
-        # Kick off a streaming completion
-        stream = client.chat.completions.create(
-            model="gpt-4o-realtime-preview",
-            messages=messages,
-            stream=True,
-        )
-        full_response = ""
-        # Iterate over streamed chunks
-        for chunk in stream:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                # Print to console immediately
-                print(delta.content, end="", flush=True)
-                full_response += delta.content
-        print()  # newline after complete
-        return full_response
-
-    except Exception as e:
-        return f"Error calling ChatGPT realtime API: {e}"
-    
+async def open_realtime_session():
+    global conn
+    # enter the websocket context once and keep it open
+    conn = await client.beta.realtime.connect(model="gpt-4o-realtime-preview").__aenter__()
+    # set modalities & send system prompt once
+    await conn.session.update(session={"modalities": ["text"]})
+    await conn.conversation.item.create(item={
+        "type": "message",
+        "role": "system",
+        "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]
+    })
 
 def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction, target_shift=0.5):
     """
@@ -239,17 +180,23 @@ def update_mood():
 # -----------------------------
 # User Input Processing Function with ChatGPT Integration
 # -----------------------------
-def process_user_input():
+async def process_user_input():
     global global_M
+    loop = asyncio.get_running_loop()
     while running_flag.value:
-        user_text = input("Enter your message (or type 'quit'): ")
+        # run input() in a thread so the loop can keep streaming
+        user_text = await loop.run_in_executor(
+            None,
+            input,
+            "Enter your message (or type 'quit'): "
+        )
         if user_text.lower() in ['quit', 'exit']:
             running_flag.value = False
             break
 
         # Get classifier predictions from user message
         try:
-            results = classifier(user_text)
+            results = await loop.run_in_executor(None, classifier, user_text)
             # Unwrap nested results if needed
             if isinstance(results, list) and results and isinstance(results[0], list):
                 results = results[0]
@@ -313,10 +260,33 @@ def process_user_input():
             closest_idx = np.argmax(emotion_sims)
             current_mood = emotion_labels[closest_idx]
 
-        print("\nChatGPT Response:")
-        asyncio.run(realtime_chat(user_text, current_mood))
-        print()
-        print("-" * 80)
+        # — send updated mood reminder (system) + user turn into our single session —
+        combined = f"(current mood: {current_mood})\n{user_text}"
+        print("→ sending to GPT:", repr(combined))
+        try:
+            await conn.conversation.item.create(item={
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":combined}]
+            })
+            print("…sent, now awaiting response…")
+            
+            # <-- NEW: bind the response stream
+            await conn.response.create()
+            async for event in conn:
+                # only handle text deltas
+                if event.type == "response.text.delta":
+                    print(event.delta, end="", flush=True)
+                # break on the done signal
+                elif event.type == "response.text.done":
+                    print()            # finish the line
+                    print("-" * 80)    # divider
+                    break
+                
+        except Exception as e:
+            print("⚠️ error sending/receiving:", e)
+            await open_realtime_session()
+
 
 # -----------------------------
 # 3D Live Plotting Function (Process)
@@ -522,37 +492,38 @@ def update_2d_plots(running_flag, shared_history):
 # -----------------------------
 # Main Execution: Set Up Threads and Processes
 # -----------------------------
-if __name__ == '__main__':
-    # Use a Manager to create shared objects for the plot processes.
-    manager = Manager()
-    shared_mood_history = manager.list()
-    # Replace the local mood_history with the shared list.
-    mood_history = shared_mood_history
-    running_flag = manager.Value('b', True)
 
-    # Start the simulation and user input threads in the main process.
-    sim_thread = threading.Thread(target=update_mood)
-    input_thread = threading.Thread(target=process_user_input)
+async def main():
+    # 1) Open one persistent WebSocket session
+    await open_realtime_session()
+
+    # 2) Start the mood simulation thread
+    sim_thread = threading.Thread(target=update_mood, daemon=True)
     sim_thread.start()
-    input_thread.start()
-    
-    # Start the 3D live plot in its own process.
+
+    # # 3) Start plotting processes as before
     plot3d_proc = Process(target=live_plot_3d, args=(running_flag, shared_mood_history))
     plot3d_proc.start()
-    
-    # Start the 2D update plots in a second process.
     plot2d_proc = Process(target=update_2d_plots, args=(running_flag, shared_mood_history))
     plot2d_proc.start()
-    
-    asyncio.run(process_user_input())
 
-    # Wait for the simulation and user input threads to finish.
+    # 4) Hand off to our async user‐input loop
+    await process_user_input()
+
+    # 5) Cleanup once user_input exits
     sim_thread.join()
-    input_thread.join()
-    
-    # Signal the plotting processes to stop and wait for them.
     running_flag.value = False
     plot3d_proc.join()
     plot2d_proc.join()
-    
     print("Simulation ended.")
+
+
+if __name__ == '__main__':
+    # Make sure manager/shared data are set up exactly as before:
+    manager = Manager()
+    shared_mood_history = manager.list()
+    mood_history = shared_mood_history
+    running_flag = manager.Value('b', True)
+
+    # Then just run our single asyncio entrypoint:
+    asyncio.run(main())
