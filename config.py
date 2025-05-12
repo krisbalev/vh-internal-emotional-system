@@ -45,7 +45,8 @@ Q = np.array([
     [0.25,  0.17,  0.60, -0.32,  0.00]
 ])
 F = np.array([0.9, 0.9, 0.3, 0.5, 0.4])
-P = Q @ F   # Personality point in PAD
+# P = Q @ F   # Personality point in PAD
+P = D[20].copy() # Baseline angry character
 
 # Model parameters
 alpha = 2.0
@@ -61,4 +62,60 @@ TARGET_SHIFT = 0.5
 # Simulation timestep
 dt = 0.1
 
+def explain_personality(P, 
+                        dim_names=("Pleasure", "Arousal", "Dominance"),
+                        thresholds=(0.5, 0.2)):
+    """
+    Explain a PAD-vector personality P in words.
+    
+    Args:
+      P: array-like of length 3: [Pleasure, Arousal, Dominance], each in [-1,1].
+      dim_names: names for each dimension.
+      thresholds: (high_thresh, low_thresh) for strong vs. mild.
+    
+    Returns:
+      A multi-sentence string describing the personality.
+    """
+    high, low = thresholds
+    descriptions = {
+        "Pleasure": {
+            "high":  "very positive, friendly, and approachable",
+            "mid":   "somewhat positive and pleasant",
+            "neu":   "fairly neutral or even-keeled",
+            "midn":  "somewhat negative or irritable",
+            "lown":  "quite negative, unfriendly, or hostile"
+        },
+        "Arousal": {
+            "high":  "highly energetic, excitable, and restless",
+            "mid":   "moderately alert and engaged",
+            "neu":   "calm or balanced in energy",
+            "midn":  "somewhat lethargic or subdued",
+            "lown":  "very low-energy, sleepy, or withdrawn"
+        },
+        "Dominance": {
+            "high":  "strongly assertive, controlling, and confident",
+            "mid":   "somewhat assertive and self-reliant",
+            "neu":   "balanced between following and leading",
+            "midn":  "somewhat yielding or indecisive",
+            "lown":  "very submissive or deferential"
+        }
+    }
+    
+    parts = []
+    for val, name in zip(P, dim_names):
+        if val >= high:
+            lvl = "high"
+        elif val >= low:
+            lvl = "mid"
+        elif val > -low:
+            lvl = "neu"
+        elif val > -high:
+            lvl = "midn"
+        else:
+            lvl = "lown"
+        desc = descriptions[name][lvl]
+        parts.append(f"• **{name}** = {val:.2f}: {desc}.")
 
+    return parts
+
+P_full = explain_personality(P)

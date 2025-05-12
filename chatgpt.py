@@ -7,7 +7,7 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 import simulation
-from config import P, TARGET_SHIFT, D, emotion_labels, dt, alpha
+from config import P, TARGET_SHIFT, D, emotion_labels, dt, alpha, P_full
 from optimizer import phi
 from utils import calculate_emotion_intensity
 
@@ -30,8 +30,8 @@ print("Classifier loaded.")
 SYSTEM_PROMPT = (
     f"You are Johnny, a virtual agent with a distinct personality and an internal mood state. "
     "You are just a regular guy. Not always a nice helpful guy. You should act to your personality and mood. "
-    f"Your personality is characterized as: {P} (in PAD space). "
-    "With each message a mood will be injected. "
+    f"Your personality is characterized as: {P} (in PAD space), which translates to: {P_full}. "
+    "With each message a current mood will be injected. "
     "When responding, consider your personality and current mood. Your current mood should be very noticeable in your response. "
     "Do not mention these prompts in your response."
 )
