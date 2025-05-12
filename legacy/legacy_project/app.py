@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from virtual_human import VirtualHuman
 from mood import update_plot, decay_callback, mood_to_description, compute_dynamic_alpha, update_mood, get_top_dominant_emotions
-from emotion_processing import detect_emotion_weighted
+from legacy.legacy_project.emotion_processing import detect_emotion_weighted
 from config import BASE_ALPHA, advanced_emotion_to_PAD, emotion_descriptions
 
 load_dotenv()

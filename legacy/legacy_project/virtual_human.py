@@ -1,6 +1,6 @@
 # virtual_human.py
 import numpy as np
-from emotion_processing import compute_emotion_weights
+from legacy.legacy_project.emotion_processing import compute_emotion_weights
 from mood import get_top_dominant_emotions
 from config import advanced_emotion_to_PAD
 from chatgpt_client import generate_chatgpt_response

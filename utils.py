@@ -1,50 +1,36 @@
-def bigfive_to_text(bigfive):
-    extraversion = bigfive.get("extraversion", 0.5)
-    neuroticism = bigfive.get("neuroticism", 0.5)
-    openness = bigfive.get("openness", 0.5)
-    agreeableness = bigfive.get("agreeableness", 0.5)
-    conscientiousness = bigfive.get("conscientiousness", 0.5)
-    
-    description = []
-    
-    # Extraversion
-    if extraversion > 0.7:
-        description.append("highly extraverted")
-    elif extraversion < 0.3:
-        description.append("introverted")
-    else:
-        description.append("moderately extraverted")
-    
-    # Neuroticism (inverse for stability)
-    if neuroticism > 0.7:
-        description.append("prone to anxiety")
-    elif neuroticism < 0.3:
-        description.append("emotionally stable")
-    else:
-        description.append("moderately emotionally stable")
-        
-    # Openness
-    if openness > 0.7:
-        description.append("very open to new experiences")
-    elif openness < 0.3:
-        description.append("more conventional")
-    else:
-        description.append("moderately open")
-    
-    # Agreeableness
-    if agreeableness > 0.7:
-        description.append("highly cooperative and empathetic")
-    elif agreeableness < 0.3:
-        description.append("more competitive")
-    else:
-        description.append("fairly agreeable")
-    
-    # Conscientiousness
-    if conscientiousness > 0.7:
-        description.append("very conscientious")
-    elif conscientiousness < 0.3:
-        description.append("laid-back")
-    else:
-        description.append("moderately conscientious")
-    
-    return ", ".join(description)
+import numpy as np
+
+# Compute emotion intensity with personality/mood bias
+def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction, target_shift=0.5):
+    """
+    Calculate the emotion intensity by projecting personality and mood
+    onto the emotion's PAD direction, normalizing via cosine, then
+    scaling by target_shift.
+
+    Args:
+        I0 (float): Base intensity (from OCC appraisal).
+        current_mood (np.array): M in PAD space.
+        personality (np.array): P in PAD space.
+        emotion_direction (np.array): D_i in PAD space.
+        target_shift (float): Maximum absolute bias contribution.
+
+    Returns:
+        float: Clipped intensity in [0, 1].
+    """
+    # normalize so dot‐product becomes cosine similarity in [-1,1]
+    norm_P = np.linalg.norm(personality)
+    norm_M = np.linalg.norm(current_mood)
+    norm_D = np.linalg.norm(emotion_direction)
+    if norm_P == 0 or norm_M == 0 or norm_D == 0:
+        # fallback to no bias if any vector is zero
+        return np.clip(I0, 0, 1)
+
+    proj_P = np.dot(personality, emotion_direction) / (norm_P * norm_D)
+    proj_M = np.dot(current_mood, emotion_direction) / (norm_M * norm_D)
+
+    # bias terms capped by target_shift
+    theta_P_i = target_shift * proj_P
+    theta_M_i = target_shift * proj_M
+
+    raw_intensity = I0 + theta_P_i + theta_M_i
+    return np.clip(raw_intensity, 0, 1)
