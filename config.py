@@ -1,91 +1,64 @@
-# Global Parameters
-BASE_ALPHA = 0.2       # Base sensitivity factor (will be modulated dynamically)
-DECAY_RATE = 0.02      # Decay rate: fraction of the difference toward baseline per second
+import numpy as np
 
-# Combined Emotion Mapping: GoEmotions (27 labels) with Additional Hoffmann Coordinates
-advanced_emotion_to_PAD = {
-    "admiration":      (0.49, -0.19, 0.05),
-    "amusement":       (0.45, 0.25, 0.0),
-    "anger":           (-0.62, 0.59, 0.23),
-    "annoyance":       (-0.4, 0.4, 0.1),
-    "approval":        (0.3, 0.1, 0.0),
-    "caring":          (0.4, 0.1, 0.2),
-    "confusion":       (0.0, 0.0, -0.1),
-    "curiosity":       (0.2, 0.3, 0.0),
-    "desire":          (0.4, 0.5, 0.2),
-    "disappointment":  (-0.64, -0.17, -0.41),
-    "disapproval":     (-0.3, 0.2, 0.0),
-    "disgust":         (-0.4, 0.2, 0.1),
-    "embarrassment":   (-0.2, -0.1, -0.1),
-    "excitement":      (0.6, 0.7, 0.1),
-    "fear":            (-0.74, 0.47, -0.62),
-    "gratitude":       (0.69, -0.09, 0.05),
-    "grief":           (-0.5, -0.4, -0.2),
-    "joy":             (0.82, 0.43, 0.55),
-    "love":            (0.80, 0.14, 0.30),
-    "nervousness":     (-0.2, 0.3, -0.2),
-    "optimism":        (0.4, 0.3, 0.0),
-    "pride":           (0.72, 0.20, 0.57),
-    "realization":     (0.1, 0.1, 0.0),
-    "relief":          (0.73, -0.24, 0.06),
-    "remorse":         (-0.42, -0.01, -0.35),
-    "sadness":         (-0.4, -0.2, -0.3),
-    "surprise":        (0.0, 0.6, 0.0),
-    # Additional Hoffmann emotions:
-    "gloating":        (0.08, 0.11, 0.44),
-    "gratification":   (0.39, -0.18, 0.41),
-    "happy for":       (0.75, 0.17, 0.37),
-    "hope":            (0.22, 0.28, -0.23),
-    "satisfaction":    (0.65, -0.42, 0.35),
-    "distress":        (-0.75, -0.31, -0.47),
-    "fears confirmed": (-0.74, 0.42, -0.52),
-    "hate":            (-0.52, 0.0, 0.28),
-    "pity":            (-0.27, -0.24, 0.24),
-    "reproach":        (-0.41, 0.47, 0.50),
-    "resentment":      (-0.52, 0.0, 0.03),
-    "shame":           (-0.66, 0.05, -0.63)
-}
+# Emotion labels and PAD space directions
+emotion_labels = [
+    "Hope", "Gratitude", "Admiration", "Gratification", "HappyFor", "Joy", "Love",
+    "Pride", "Relief", "Satisfaction", "Gloating", "Remorse", "Disappointment",
+    "Fear", "Shame", "Resentment", "Fears-confirmed", "Pity", "Distress",
+    "Anger", "Hate", "Reproach"
+]
 
-# Advanced Emotion Descriptions
-emotion_descriptions = {
-    "admiration":      "A feeling of respect and warm approval.",
-    "amusement":       "Finding something funny or entertaining.",
-    "anger":           "A strong feeling of displeasure or hostility.",
-    "annoyance":       "A slight feeling of irritation.",
-    "approval":        "A positive endorsement or acceptance.",
-    "caring":          "A sense of concern and empathy.",
-    "confusion":       "A state of being bewildered or unclear.",
-    "curiosity":       "A strong desire to learn or know more.",
-    "desire":          "A strong feeling of wanting something.",
-    "disappointment":  "A feeling of sadness when expectations are not met.",
-    "disapproval":     "A feeling of rejection or disfavor.",
-    "disgust":         "A strong feeling of aversion or repulsion.",
-    "embarrassment":   "A feeling of self-consciousness or awkwardness.",
-    "excitement":      "A state of high energy and enthusiasm.",
-    "fear":            "An unpleasant emotion caused by the threat of harm or danger.",
-    "gratitude":       "A feeling of thankfulness and appreciation.",
-    "grief":           "Deep sorrow, especially following a loss.",
-    "joy":             "A state of great pleasure and happiness.",
-    "love":            "An intense feeling of deep affection.",
-    "nervousness":     "A state of anxiousness or worry.",
-    "optimism":        "Hopefulness and confidence about the future.",
-    "pride":           "A sense of satisfaction from one's achievements or qualities.",
-    "realization":     "The moment of understanding something clearly.",
-    "relief":          "A feeling of reassurance following the end of anxiety or distress.",
-    "remorse":         "Deep regret or guilt for a wrong committed.",
-    "sadness":         "A feeling of sorrow or unhappiness.",
-    "surprise":        "A feeling of shock or astonishment.",
-    # Additional Hoffmann descriptions:
-    "gloating":        "A feeling of malicious self-satisfaction, often at someone else's misfortune.",
-    "gratification":   "A sense of pleasure or satisfaction from achieving a desire or goal.",
-    "happy for":       "Feeling joyful on behalf of someone else's good fortune.",
-    "hope":            "An optimistic state based on the expectation of positive outcomes.",
-    "satisfaction":    "A feeling of contentment or fulfillment when expectations are met.",
-    "distress":        "An overwhelming sense of anxiety, sorrow, or pain.",
-    "fears confirmed": "An emotion experienced when one's anxieties or fears are validated by events.",
-    "hate":            "An intense feeling of dislike or hostility.",
-    "pity":            "A feeling of sorrow or compassion caused by the suffering of others.",
-    "reproach":        "A feeling of disapproval or disappointment towards someone’s actions.",
-    "resentment":      "A bitter indignation resulting from unfair treatment.",
-    "shame":           "A painful feeling of humiliation or distress due to guilt or inadequacy."
-}
+D = np.array([
+    [0.2,  0.2,  -0.1], # Hope
+    [0.4,  0.2,  -0.3], # Gratitude
+    [0.5,  0.3,  -0.2], # Admiration
+    [0.6,  0.5,   0.4], # Gratification
+    [0.4,  0.2,   0.2], # HappyFor
+    [0.4,  0.2,   0.1], # Joy
+    [0.3,  0.1,   0.2], # Love
+    [0.4,  0.3,   0.3], # Pride
+    [0.2, -0.3,   0.4], # Relief
+    [0.3, -0.2,   0.4], # Satisfaction
+    [0.3, -0.3,  -0.1], # Gloating
+    [-0.3,  0.1, -0.6], # Remorse
+    [-0.3,  0.1, -0.4], # Disappointment
+    [-0.64, 0.60, -0.43], # Fear
+    [-0.3,  0.1, -0.6], # Shame
+    [-0.2, -0.3, -0.2], # Resentment
+    [-0.5, -0.3, -0.7], # Fears-confirmed 
+    [-0.4, -0.2, -0.5], # Pity
+    [-0.4, -0.2, -0.5], # Distress
+    [-0.51, 0.59,  0.25], # Anger
+    [-0.6,  0.6,   0.3], # Hate
+    [-0.3, -0.1,  0.4] # Reproach
+])
+
+S = len(emotion_labels)
+
+# Initial emotion probabilities
+p = np.ones(S) / S
+
+# Big Five to PAD conversion
+Q = np.array([
+    [0.00,  0.00,  0.21,  0.59,  0.19],
+    [0.15,  0.00,  0.00,  0.30, -0.57],
+    [0.25,  0.17,  0.60, -0.32,  0.00]
+])
+F = np.array([0.9, 0.9, 0.3, 0.5, 0.4])
+P = Q @ F   # Personality point in PAD
+
+# Model parameters
+alpha = 2.0
+mu_P = 0.1
+lambda_e = 1.0
+lambda_m = 0.001
+event_rate = 1/3.0
+
+# Derived parameter
+a = alpha / lambda_e * (1 - np.exp(-lambda_e / event_rate))
+TARGET_SHIFT = 0.5
+
+# Simulation timestep
+dt = 0.1
+
+
