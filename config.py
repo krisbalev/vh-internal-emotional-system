@@ -5,32 +5,51 @@ emotion_labels = [
     "Hope", "Gratitude", "Admiration", "Gratification", "HappyFor", "Joy", "Love",
     "Pride", "Relief", "Satisfaction", "Gloating", "Remorse", "Disappointment",
     "Fear", "Shame", "Resentment", "Fears-confirmed", "Pity", "Distress",
-    "Anger", "Hate", "Reproach"
+    "Anger", "Hate", "Reproach", "Amusement", "Annoyance", "Approval", "Caring", "Confusion", "Curiosity",
+    "Desire", "Disapproval", "Disgust", "Embarrassment", "Excitement", "Grief",
+    "Nervousness", "Optimism", "Realization", "Sadness", "Surprise"
 ]
 
 D = np.array([
-    [0.2,  0.2,  -0.1], # Hope
-    [0.4,  0.2,  -0.3], # Gratitude
-    [0.5,  0.3,  -0.2], # Admiration
-    [0.6,  0.5,   0.4], # Gratification
-    [0.4,  0.2,   0.2], # HappyFor
-    [0.4,  0.2,   0.1], # Joy
-    [0.3,  0.1,   0.2], # Love
-    [0.4,  0.3,   0.3], # Pride
-    [0.2, -0.3,   0.4], # Relief
-    [0.3, -0.2,   0.4], # Satisfaction
-    [0.3, -0.3,  -0.1], # Gloating
-    [-0.3,  0.1, -0.6], # Remorse
-    [-0.3,  0.1, -0.4], # Disappointment
-    [-0.64, 0.60, -0.43], # Fear
-    [-0.3,  0.1, -0.6], # Shame
-    [-0.2, -0.3, -0.2], # Resentment
-    [-0.5, -0.3, -0.7], # Fears-confirmed 
-    [-0.4, -0.2, -0.5], # Pity
-    [-0.4, -0.2, -0.5], # Distress
-    [-0.51, 0.59,  0.25], # Anger
-    [-0.6,  0.6,   0.3], # Hate
-    [-0.3, -0.1,  0.4] # Reproach
+    [ 0.22,  0.28, -0.23],  # Hope
+    [ 0.69, -0.09,  0.05],  # Gratitude
+    [ 0.49, -0.19,  0.05],  # Admiration
+    [ 0.39, -0.18,  0.41],  # Gratification
+    [ 0.75,  0.17,  0.37],  # HappyFor
+    [ 0.82,  0.43,  0.55],  # Joy
+    [ 0.80,  0.14,  0.30],  # Love
+    [ 0.72,  0.20,  0.57],  # Pride
+    [ 0.73, -0.24,  0.06],  # Relief
+    [ 0.65, -0.42,  0.35],  # Satisfaction
+    [ 0.08,  0.11,  0.44],  # Gloating
+    [-0.42, -0.01, -0.35],  # Remorse
+    [-0.64, -0.17, -0.41],  # Disappointment
+    [-0.74,  0.47, -0.62],  # Fear
+    [-0.66,  0.05, -0.63],  # Shame
+    [-0.52,  0.00,  0.03],  # Resentment
+    [-0.74,  0.42, -0.52],  # Fears-confirmed
+    [-0.27, -0.24,  0.24],  # Pity
+    [-0.75, -0.31, -0.47],  # Distress
+    [-0.62,  0.59,  0.23],  # Anger
+    [-0.52,  0.00,  0.28],  # Hate
+    [-0.41,  0.47,  0.50],  # Reproach
+    [ 0.45,  0.25,  0.00],  # Amusement
+    [-0.40,  0.40,  0.10],  # Annoyance
+    [ 0.30,  0.10,  0.00],  # Approval
+    [ 0.40,  0.10,  0.20],  # Caring
+    [ 0.00,  0.00, -0.10],  # Confusion
+    [ 0.20,  0.30,  0.00],  # Curiosity
+    [ 0.40,  0.50,  0.20],  # Desire
+    [-0.30,  0.20,  0.00],  # Disapproval
+    [-0.40,  0.20,  0.10],  # Disgust
+    [-0.20, -0.10, -0.10],  # Embarrassment
+    [ 0.60,  0.70,  0.10],  # Excitement
+    [-0.50, -0.40, -0.20],  # Grief
+    [-0.20,  0.30, -0.20],  # Nervousness
+    [ 0.40,  0.30,  0.00],  # Optimism
+    [ 0.10,  0.10,  0.00],  # Realization
+    [-0.40, -0.20, -0.30],  # Sadness
+    [ 0.00,  0.60,  0.00],  # Surprise
 ])
 
 S = len(emotion_labels)

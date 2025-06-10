@@ -13,7 +13,7 @@ def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction
         personality (np.array): P in PAD space.
         emotion_direction (np.array): D_i in PAD space.
         target_shift (float): Maximum absolute bias contribution.
-
+    
     Returns:
         float: Clipped intensity in [0, 1].
     """
@@ -29,8 +29,8 @@ def calculate_emotion_intensity(I0, current_mood, personality, emotion_direction
     proj_M = np.dot(current_mood, emotion_direction) / (norm_M * norm_D)
 
     # bias terms capped by target_shift
-    theta_P_i = target_shift * proj_P
-    theta_M_i = target_shift * proj_M
+    theta_P_i = target_shift * max(0, proj_P)
+    theta_M_i = target_shift * max(0, proj_M)
 
     raw_intensity = I0 + theta_P_i + theta_M_i
     return np.clip(raw_intensity, 0, 1)

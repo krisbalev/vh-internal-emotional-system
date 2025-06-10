@@ -1,0 +1,36 @@
+BOSS (mood: Joy) ▶ Good morning, Alex. Please have a seat.
+EMP (mood: Approval) ▶ 
+Good morning! Thank you, I'll take a seat. How can I assist you today?
+BOSS (mood: Joy) ▶ I wanted to go over your recent projects—I've noticed a few missed deadlines.
+EMP (mood: Amusement) ▶ 
+I appreciate your attention to detail. Let's review those projects together. I'm here to clarify any concerns and discuss how we can improve moving forward.
+BOSS (mood: Joy) ▶ To be honest, Alex, this level of inconsistency is disappointing for someone at your level.
+EMP (mood: Optimism) ▶ 
+I understand your concerns and appreciate your honesty. I'm committed to addressing these inconsistencies and ensuring that my performance meets the expectations for my level. Let's discuss a plan to move forward positively.
+BOSS (mood: Joy) ▶ Frankly, I'm frustrated that after repeated feedback, the same mistakes keep happening.
+EMP (mood: Annoyance) ▶ 
+Noted. It seems we're going in circles here. I'll take another look at the feedback and correct the course. Let's make sure we're both clear on the expectations this time.
+BOSS (mood: Joy) ▶ I can't believe I'm still having to repeat the same points—it's unacceptable.
+EMP (mood: Annoyance) ▶ 
+Understood. Repeating the same points isn't productive. Let's pinpoint the exact issues and resolve them once and for all. I'm prepared to make the necessary changes.
+BOSS (mood: Joy) ▶ We've talked about this too many times. It's hurting the team's progress.
+EMP (mood: Disapproval) ▶ 
+I'm aware of the impact on the team. Let's address the specific issues immediately and implement changes to prevent this from recurring. It's time to move forward.
+BOSS (mood: Joy) ▶ If there's no immediate improvement, I'll have no choice but to let you go.
+EMP (mood: Disapproval) ▶ 
+Understood. The message is clear. I'll take immediate action to rectify the situation and demonstrate the required improvements. Let's see the changes in place.
+BOSS (mood: Joy) ▶ I'm afraid that decision has been made—your employment ends today.
+EMP (mood: Disapproval) ▶ 
+Fine. If that's the final decision, I'll gather my things. I'll expect details about the termination process and any final obligations.
+BOSS (mood: Gloating) ▶ It's understandable to feel that way. We'll make this as smooth as possible. You'll receive a comprehensive package detailing your severance, benefits, and any final duties. Take your time to review it, and if you have any questions, HR is available to assist. Thank you for your contributions, and we wish you the best in your future endeavors.
+EMP (mood: Disapproval) ▶ 
+I'll review the package and reach out if I need clarification. I'll gather my belongings and finalize any remaining tasks. Goodbye, and thanks for the opportunity.
+BOSS (mood: Pride) ▶ You're welcome. Your professionalism is appreciated. Take the time you need to wrap things up, and don't hesitate to reach out for any clarifications. Goodbye, and best of luck with your next steps.
+EMP (mood: Disapproval) ▶ 
+Thank you. I'll make sure everything is in order before I leave. Goodbye.
+BOSS (mood: Pride) ▶ That's appreciated. Goodbye, and take care.
+EMP (mood: Annoyance) ▶ 
+Goodbye. Take care as well.
+BOSS (mood: Pride) ▶ Goodbye. All the best.
+EMP (mood: Annoyance) ▶ 
+Goodbye. Best of luck to you too.

@@ -11,6 +11,6 @@ def pcmd_objective(phi):
 # Optimize phi with bounds phi > 0.1
 res = minimize(pcmd_objective, np.ones(S), bounds=[(0.1, None)] * S)
 phi = res.x
-print("Optimized phi weights:", phi)
+# print("Optimized phi weights:", phi)
 
 
